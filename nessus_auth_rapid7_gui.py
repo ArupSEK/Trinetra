@@ -52,6 +52,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import os
 import secrets
 import sys
@@ -1248,10 +1249,13 @@ class LoginDialog:
         self.username_var = tk.StringVar()
         self.password_var = tk.StringVar()
         self.confirm_var = tk.StringVar()
+        self.logo_phase = 0
+        self.logo_after_id: Optional[str] = None
 
         self.window = tk.Toplevel(root)
-        self.window.title("Login")
+        self.window.title(f"{APP_NAME} Login")
         self.window.resizable(False, False)
+        self.window.configure(bg="#F8FAFC")
         self.window.transient(root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.cancel)
@@ -1261,37 +1265,141 @@ class LoginDialog:
         self.username_entry.focus_set()
 
     def build(self):
-        title = "Create Admin Login" if self.setup_mode else "Login Required"
-        subtitle = "First run setup" if self.setup_mode else APP_NAME
-        frame = ttk.Frame(self.window, padding=18)
-        frame.pack(fill="both", expand=True)
+        self.window.geometry("980x560")
+        shell = tk.Frame(self.window, bg="#F8FAFC")
+        shell.pack(fill="both", expand=True)
 
-        ttk.Label(frame, text=title, font=("Segoe UI", 15, "bold")).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Label(frame, text=subtitle).grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 14))
+        left = tk.Frame(shell, bg="#F8FAFC", width=420)
+        left.pack(side="left", fill="both")
+        left.pack_propagate(False)
 
-        ttk.Label(frame, text="Username").grid(row=2, column=0, sticky="w", pady=4)
-        self.username_entry = ttk.Entry(frame, textvariable=self.username_var, width=32)
-        self.username_entry.grid(row=2, column=1, sticky="ew", pady=4)
+        form = tk.Frame(left, bg="#F8FAFC")
+        form.place(relx=0.5, rely=0.5, anchor="center", width=310)
 
-        ttk.Label(frame, text="Password").grid(row=3, column=0, sticky="w", pady=4)
-        ttk.Entry(frame, textvariable=self.password_var, width=32, show="*").grid(row=3, column=1, sticky="ew", pady=4)
+        tk.Label(form, text="N-CAD", bg="#F8FAFC", fg="#0F766E", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        tk.Label(
+            form,
+            text="Nessus Credential Assurance",
+            bg="#F8FAFC",
+            fg="#334155",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(anchor="w", pady=(2, 26))
 
-        row = 4
+        title = "Create secure access" if self.setup_mode else "Welcome back"
+        subtitle = "Set up your local admin login" if self.setup_mode else "Sign in to continue remediation work"
+        tk.Label(form, text=title, bg="#F8FAFC", fg="#0F172A", font=("Segoe UI", 19, "bold")).pack(anchor="w")
+        tk.Label(form, text=subtitle, bg="#F8FAFC", fg="#64748B", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 22))
+
+        tk.Label(form, text="Username", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        self.username_entry = tk.Entry(form, textvariable=self.username_var, width=34, bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11))
+        self.username_entry.pack(fill="x", ipady=8, pady=(4, 14))
+
+        tk.Label(form, text="Password", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Entry(form, textvariable=self.password_var, width=34, show="*", bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11)).pack(fill="x", ipady=8, pady=(4, 14))
+
         if self.setup_mode:
-            ttk.Label(frame, text="Confirm").grid(row=row, column=0, sticky="w", pady=4)
-            ttk.Entry(frame, textvariable=self.confirm_var, width=32, show="*").grid(row=row, column=1, sticky="ew", pady=4)
-            row += 1
+            tk.Label(form, text="Confirm password", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            tk.Entry(form, textvariable=self.confirm_var, width=34, show="*", bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11)).pack(fill="x", ipady=8, pady=(4, 14))
+
+        button_text = "Create Login" if self.setup_mode else "Sign In"
+        tk.Button(
+            form,
+            text=button_text,
+            command=self.submit,
+            bg="#0F766E",
+            fg="#FFFFFF",
+            activebackground="#115E59",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 11, "bold"),
+            cursor="hand2",
+        ).pack(fill="x", ipady=9, pady=(4, 10))
+
+        tk.Button(
+            form,
+            text="Exit",
+            command=self.cancel,
+            bg="#E2E8F0",
+            fg="#0F172A",
+            activebackground="#CBD5E1",
+            activeforeground="#0F172A",
+            relief="flat",
+            bd=0,
+            font=("Segoe UI", 10, "bold"),
+            cursor="hand2",
+        ).pack(fill="x", ipady=8)
 
         self.message_var = tk.StringVar()
-        ttk.Label(frame, textvariable=self.message_var).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 8))
-        row += 1
+        tk.Label(form, textvariable=self.message_var, bg="#F8FAFC", fg="#DC2626", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 0))
 
-        button_text = "Create Login" if self.setup_mode else "Login"
-        ttk.Button(frame, text=button_text, command=self.submit).grid(row=row, column=1, sticky="e")
-        ttk.Button(frame, text="Exit", command=self.cancel).grid(row=row, column=0, sticky="w")
+        tk.Label(
+            form,
+            text="Local authentication protects dashboard access on this workstation.",
+            bg="#F8FAFC",
+            fg="#64748B",
+            wraplength=300,
+            justify="left",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(24, 0))
+
+        right = tk.Canvas(shell, width=560, height=560, bg="#111827", highlightthickness=0)
+        right.pack(side="right", fill="both", expand=True)
+        self.hero_canvas = right
+        self.draw_login_art()
 
         self.window.bind("<Return>", lambda _e: self.submit())
-        frame.columnconfigure(1, weight=1)
+
+    def draw_login_art(self):
+        c = self.hero_canvas
+        for x in range(0, 580, 28):
+            c.create_line(x, 0, x, 560, fill="#1F2937")
+        for y in range(0, 580, 28):
+            c.create_line(0, y, 560, y, fill="#1F2937")
+        c.create_oval(350, 350, 760, 760, fill="#0F766E", outline="")
+        c.create_oval(390, 390, 690, 690, fill="#1D4ED8", outline="")
+        c.create_text(68, 78, text="Credential Assurance", fill="#5EEAD4", font=("Segoe UI", 13, "bold"), anchor="w")
+        c.create_text(
+            68,
+            160,
+            text="CONTROL\nWHAT SCANNERS\nCAN VERIFY",
+            fill="#F8FAFC",
+            font=("Segoe UI", 34, "bold"),
+            anchor="w",
+            justify="left",
+        )
+        c.create_text(
+            70,
+            330,
+            text="Turn authentication evidence into focused remediation.\nPrioritize failed, partial, missing-credential, and\nunreachable targets before they become audit gaps.",
+            fill="#CBD5E1",
+            font=("Segoe UI", 15, "bold"),
+            anchor="w",
+            justify="left",
+            width=430,
+        )
+        c.create_text(70, 470, text="\"Visibility becomes value when it drives ownership.\"", fill="#A7F3D0", font=("Segoe UI", 13, "italic"), anchor="w")
+        c.create_text(70, 505, text=f"Built by {AUTHOR}", fill="#94A3B8", font=("Segoe UI", 10, "bold"), anchor="w")
+
+        self.logo_ring = c.create_oval(398, 70, 492, 164, outline="#5EEAD4", width=3)
+        self.logo_ring_inner = c.create_oval(416, 88, 474, 146, outline="#38BDF8", width=2)
+        self.logo_dot = c.create_oval(440, 64, 454, 78, fill="#F8FAFC", outline="")
+        self.logo_core = c.create_text(445, 118, text="CA", fill="#F8FAFC", font=("Segoe UI", 17, "bold"))
+        self.animate_logo()
+
+    def animate_logo(self):
+        if not hasattr(self, "hero_canvas"):
+            return
+        self.logo_phase += 1
+        angle = self.logo_phase / 12
+        radius = 50
+        cx, cy = 445, 117
+        x = cx + math.cos(angle) * radius
+        y = cy + math.sin(angle) * radius
+        self.hero_canvas.coords(self.logo_dot, x - 7, y - 7, x + 7, y + 7)
+        pulse = 4 + math.sin(angle * 1.5) * 4
+        self.hero_canvas.coords(self.logo_ring_inner, 416 - pulse, 88 - pulse, 474 + pulse, 146 + pulse)
+        self.logo_after_id = self.window.after(50, self.animate_logo)
 
     def center(self):
         self.window.update_idletasks()
@@ -1314,11 +1422,21 @@ class LoginDialog:
                 if not self.auth.verify(username, password):
                     raise ValueError("Invalid username or password.")
                 self.authenticated = True
+            if self.logo_after_id:
+                try:
+                    self.window.after_cancel(self.logo_after_id)
+                except Exception:
+                    pass
             self.window.destroy()
         except Exception as exc:
             self.message_var.set(str(exc))
 
     def cancel(self):
+        if self.logo_after_id:
+            try:
+                self.window.after_cancel(self.logo_after_id)
+            except Exception:
+                pass
         self.authenticated = False
         self.window.destroy()
 
