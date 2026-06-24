@@ -14,7 +14,7 @@ Core logic
 2. Raw auth plugin rows are grouped by Host + Auth Protocol.
 3. Protocol status is calculated first.
 4. Host status is calculated from protocol statuses.
-5. Counts are mutually exclusive: PASS / FAIL / PARTIAL / NOCREDS / UNKNOWN.
+5. Counts are mutually exclusive: PASS / FAIL / PARTIAL / NOCREDS / NOT_REACHABLE / UNKNOWN.
 
 Supported evidence plugins
 --------------------------
@@ -23,6 +23,7 @@ FAIL:      104410, 122503, 91822
 PARTIAL:   110385, 117885, 24786
 NOCREDS:   110723
 UNKNOWN:   117886, 21745, 110695 and no decisive evidence
+NOT_REACHABLE: configured API scan target missing from result host inventory / CSV
 
 Install
 -------
@@ -115,6 +116,7 @@ class AuthStatus(str, Enum):
     FAIL = "FAIL"
     PARTIAL = "PARTIAL"
     NOCREDS = "NOCREDS"
+    NOT_REACHABLE = "NOT_REACHABLE"
     UNKNOWN = "UNKNOWN"
 
 
@@ -151,15 +153,17 @@ RECOMMENDATION_BY_STATUS = {
     AuthStatus.FAIL: "Validate username/password/key, domain format, network access, and protocol reachability. Re-test credentialed scan.",
     AuthStatus.PARTIAL: "Authentication is mixed or degraded. Check privilege level, sudo/admin rights, intermittent failures, and protocol-specific failures.",
     AuthStatus.NOCREDS: "Add valid credentials for the detected authentication protocol in the Nessus scan policy.",
+    AuthStatus.NOT_REACHABLE: "Host was configured as a scan target but did not appear in the scan host inventory or CSV results. Verify routing, firewall, scanner reachability, and target scope.",
     AuthStatus.UNKNOWN: "Review raw plugin evidence. This may be unsupported OS/patch assessment, filtered output, or missing auth evidence.",
 }
 
-STATUS_ORDER = [AuthStatus.PASS, AuthStatus.FAIL, AuthStatus.PARTIAL, AuthStatus.NOCREDS, AuthStatus.UNKNOWN]
+STATUS_ORDER = [AuthStatus.PASS, AuthStatus.FAIL, AuthStatus.PARTIAL, AuthStatus.NOCREDS, AuthStatus.NOT_REACHABLE, AuthStatus.UNKNOWN]
 STATUS_LABELS = {
     AuthStatus.PASS: "Auth Passed",
     AuthStatus.FAIL: "Auth Failed",
     AuthStatus.PARTIAL: "Partial Auth",
     AuthStatus.NOCREDS: "No Credentials",
+    AuthStatus.NOT_REACHABLE: "Not Reachable",
     AuthStatus.UNKNOWN: "Unknown",
 }
 
@@ -168,6 +172,7 @@ STATUS_COLORS = {
     AuthStatus.FAIL: "#EF4444",
     AuthStatus.PARTIAL: "#F97316",
     AuthStatus.NOCREDS: "#8B5CF6",
+    AuthStatus.NOT_REACHABLE: "#64748B",
     AuthStatus.UNKNOWN: "#EAB308",
 }
 
@@ -177,6 +182,7 @@ METRIC_CARD_STYLES = {
     "Auth Failed": ("FailCard.TFrame", "FailCardTitle.TLabel", "FailCardValue.TLabel"),
     "Partial Auth": ("PartialCard.TFrame", "PartialCardTitle.TLabel", "PartialCardValue.TLabel"),
     "No Credentials": ("NoCredsCard.TFrame", "NoCredsCardTitle.TLabel", "NoCredsCardValue.TLabel"),
+    "Not Reachable": ("NotReachableCard.TFrame", "NotReachableCardTitle.TLabel", "NotReachableCardValue.TLabel"),
     "Unknown": ("UnknownCard.TFrame", "UnknownCardTitle.TLabel", "UnknownCardValue.TLabel"),
     "Credential Coverage %": ("CoverageCard.TFrame", "CoverageCardTitle.TLabel", "CoverageCardValue.TLabel"),
     "Auth Success %": ("SuccessCard.TFrame", "SuccessCardTitle.TLabel", "SuccessCardValue.TLabel"),
@@ -341,6 +347,53 @@ def sort_hosts(hosts: Iterable[str]) -> List[str]:
         except Exception:
             return (1, 0, str(h))
     return sorted(set([str(h).strip() for h in hosts if str(h).strip()]), key=key_func)
+
+
+def normalize_host_token(value: Any) -> str:
+    return str(value or "").strip().strip(",;")
+
+
+def split_target_text(value: Any) -> List[str]:
+    text = str(value or "")
+    parts = re.split(r"[\s,;]+", text)
+    return [normalize_host_token(part) for part in parts if normalize_host_token(part)]
+
+
+def expand_target_token(token: str, max_expand: int = 65536) -> List[str]:
+    token = normalize_host_token(token)
+    if not token:
+        return []
+
+    try:
+        network = ipaddress.ip_network(token, strict=False)
+        if network.num_addresses > max_expand:
+            return [token]
+        return [str(ip) for ip in network.hosts()] or [str(network.network_address)]
+    except ValueError:
+        pass
+
+    if "-" in token:
+        start, end = token.split("-", 1)
+        start = start.strip()
+        end = end.strip()
+        try:
+            start_ip = ipaddress.ip_address(start)
+            if re.fullmatch(r"\d+", end):
+                prefix = start.rsplit(".", 1)[0] if start_ip.version == 4 else ""
+                if prefix:
+                    end_ip = ipaddress.ip_address(f"{prefix}.{end}")
+                else:
+                    end_ip = ipaddress.ip_address(end)
+            else:
+                end_ip = ipaddress.ip_address(end)
+            if start_ip.version == end_ip.version and int(start_ip) <= int(end_ip):
+                count = int(end_ip) - int(start_ip) + 1
+                if count <= max_expand:
+                    return [str(ipaddress.ip_address(int(start_ip) + i)) for i in range(count)]
+        except ValueError:
+            pass
+
+    return [token]
 
 
 def extract_regex_line(patterns: List[str], text: str) -> str:
@@ -524,6 +577,7 @@ class NessusClient:
 class AuthClassifier:
     def __init__(self):
         self.notes: List[str] = []
+        self.configured_targets: List[str] = []
 
     def parse_csv(self, csv_path: Path) -> Tuple[List[Dict[str, Any]], List[AuthFinding], List[str]]:
         raw_rows: List[Dict[str, Any]] = []
@@ -594,6 +648,24 @@ class AuthClassifier:
                 hosts.append(candidate)
         return sort_hosts(hosts)
 
+    def targets_from_scan_details(self, details: Dict[str, Any]) -> List[str]:
+        raw_targets: List[str] = []
+        settings = details.get("settings", {}) or {}
+        info = details.get("info", {}) or {}
+
+        for container in (settings, info, details):
+            for key in ("text_targets", "targets", "target", "scan_targets"):
+                value = container.get(key) if isinstance(container, dict) else None
+                if isinstance(value, list):
+                    raw_targets.extend(str(v) for v in value)
+                elif value:
+                    raw_targets.extend(split_target_text(value))
+
+        expanded: List[str] = []
+        for target in raw_targets:
+            expanded.extend(expand_target_token(target))
+        return sort_hosts(expanded)
+
     def classify_protocol(self, findings: List[AuthFinding]) -> ProtocolStatusRecord:
         if not findings:
             return ProtocolStatusRecord(host="", auth_protocol="HOST", status=AuthStatus.UNKNOWN)
@@ -645,6 +717,17 @@ class AuthClassifier:
             authoritative_hosts = sort_hosts([f.host for f in findings])
             self.notes.append("Authoritative host inventory was not available; Total IPs falls back to unique hosts in CSV.")
 
+        result_hosts = sort_hosts(set(authoritative_hosts) | {f.host for f in findings})
+        configured_targets = getattr(self, "configured_targets", [])
+        if configured_targets:
+            self.notes.append(
+                "Configured scan targets were read from Nessus scan settings. NOT_REACHABLE means the target did not appear in the host inventory or CSV results."
+            )
+            self.notes.append(
+                "If targets are hostnames, DNS aliases, asset groups, or very large CIDR ranges, compare results carefully because Nessus may report a different resolved host value."
+            )
+            authoritative_hosts = sort_hosts(set(result_hosts) | set(configured_targets))
+
         by_host_protocol: Dict[str, Dict[str, List[AuthFinding]]] = defaultdict(lambda: defaultdict(list))
         for f in findings:
             proto = f.auth_protocol or "HOST"
@@ -661,7 +744,13 @@ class AuthClassifier:
         host_records: List[HostStatusRecord] = []
         for host in authoritative_hosts:
             protos = protocol_records_by_host.get(host, [])
-            if not protos:
+            if configured_targets and host in configured_targets and host not in result_hosts:
+                status = AuthStatus.NOT_REACHABLE
+                proto_status_map = {}
+                plugin_ids = []
+                reasons = ["Configured scan target did not appear in Nessus host inventory or CSV results"]
+                accounts = []
+            elif not protos:
                 status = AuthStatus.UNKNOWN
                 proto_status_map = {}
                 plugin_ids: List[int] = []
@@ -712,6 +801,7 @@ class AuthClassifier:
         failed = counts.get(AuthStatus.FAIL, 0)
         partial = counts.get(AuthStatus.PARTIAL, 0)
         nocreds = counts.get(AuthStatus.NOCREDS, 0)
+        not_reachable = counts.get(AuthStatus.NOT_REACHABLE, 0)
         unknown = counts.get(AuthStatus.UNKNOWN, 0)
 
         metrics = {
@@ -720,6 +810,7 @@ class AuthClassifier:
             "Auth Failed": failed,
             "Partial Auth": partial,
             "No Credentials": nocreds,
+            "Not Reachable": not_reachable,
             "Unknown": unknown,
             "Auth Success %": round((passed / total * 100), 2) if total else 0.0,
             "Auth Failure %": round((failed / total * 100), 2) if total else 0.0,
@@ -850,6 +941,7 @@ class Exporter:
             "fail": PatternFill("solid", fgColor="FFC7CE"),
             "partial": PatternFill("solid", fgColor="FCE4D6"),
             "nocreds": PatternFill("solid", fgColor="E7E6E6"),
+            "not_reachable": PatternFill("solid", fgColor="D9E2F3"),
             "unknown": PatternFill("solid", fgColor="FFF2CC"),
         }
         thin = Side(style="thin", color="B7B7B7")
@@ -895,6 +987,7 @@ class Exporter:
             ("Auth Failed", data.metrics.get("Auth Failed", 0)),
             ("Partial Auth", data.metrics.get("Partial Auth", 0)),
             ("No Credentials", data.metrics.get("No Credentials", 0)),
+            ("Not Reachable", data.metrics.get("Not Reachable", 0)),
             ("Unknown", data.metrics.get("Unknown", 0)),
         ]
         for i, (label, count) in enumerate(status_metric_map, start=chart_row + 1):
@@ -912,7 +1005,7 @@ class Exporter:
         # Failure reason chart table.
         reason_counts = Counter()
         for h in data.host_records:
-            if h.status in {AuthStatus.FAIL, AuthStatus.PARTIAL, AuthStatus.NOCREDS, AuthStatus.UNKNOWN}:
+            if h.status in {AuthStatus.FAIL, AuthStatus.PARTIAL, AuthStatus.NOCREDS, AuthStatus.NOT_REACHABLE, AuthStatus.UNKNOWN}:
                 if h.reasons:
                     reason_counts[h.reasons[0]] += 1
         reason_start = 18
@@ -964,6 +1057,7 @@ class Exporter:
                     elif val == "FAIL": fill = fills["fail"]
                     elif val == "PARTIAL": fill = fills["partial"]
                     elif val == "NOCREDS": fill = fills["nocreds"]
+                    elif val == "NOT_REACHABLE": fill = fills["not_reachable"]
                     elif val == "UNKNOWN": fill = fills["unknown"]
                     if fill:
                         for c in range(1, ws2.max_column + 1):
@@ -1008,12 +1102,13 @@ class Exporter:
             # Pie chart page.
             fig2 = Figure(figsize=(11.69, 8.27))
             ax2 = fig2.add_subplot(111)
-            labels = ["Passed", "Failed", "Partial", "No Creds", "Unknown"]
+            labels = ["Passed", "Failed", "Partial", "No Creds", "Not Reachable", "Unknown"]
             sizes = [
                 data.metrics.get("Auth Passed", 0),
                 data.metrics.get("Auth Failed", 0),
                 data.metrics.get("Partial Auth", 0),
                 data.metrics.get("No Credentials", 0),
+                data.metrics.get("Not Reachable", 0),
                 data.metrics.get("Unknown", 0),
             ]
             if sum(sizes) > 0:
@@ -1114,6 +1209,7 @@ class NessusAuthDashboardGUI:
                 "Fail": STATUS_COLORS[AuthStatus.FAIL],
                 "Partial": STATUS_COLORS[AuthStatus.PARTIAL],
                 "NoCreds": STATUS_COLORS[AuthStatus.NOCREDS],
+                "NotReachable": STATUS_COLORS[AuthStatus.NOT_REACHABLE],
                 "Unknown": STATUS_COLORS[AuthStatus.UNKNOWN],
                 "Coverage": "#14B8A6",
                 "Success": "#84CC16",
@@ -1138,6 +1234,7 @@ class NessusAuthDashboardGUI:
                 "Fail": "#DC2626",
                 "Partial": "#EA580C",
                 "NoCreds": "#7C3AED",
+                "NotReachable": "#475569",
                 "Unknown": "#CA8A04",
                 "Coverage": "#0D9488",
                 "Success": "#65A30D",
@@ -1166,7 +1263,7 @@ class NessusAuthDashboardGUI:
         self.style.map("TNotebook.Tab", background=[("selected", tab_selected)], foreground=[("selected", "#FFFFFF")])
         self.style.configure("Horizontal.TProgressbar", troughcolor=panel, background=accent, bordercolor=border, lightcolor=accent, darkcolor=accent)
 
-        card_names = ["Total", "Pass", "Fail", "Partial", "NoCreds", "Unknown", "Coverage", "Success"]
+        card_names = ["Total", "Pass", "Fail", "Partial", "NoCreds", "NotReachable", "Unknown", "Coverage", "Success"]
         for name in card_names:
             color = card_palette[name]
             self.style.configure(f"{name}Card.TFrame", background=color, relief="flat")
@@ -1295,6 +1392,7 @@ class NessusAuthDashboardGUI:
             ("Auth Failed", "Auth Failed"),
             ("Partial Auth", "Partial Auth"),
             ("No Credentials", "No Credentials"),
+            ("Not Reachable", "Not Reachable"),
             ("Unknown", "Unknown"),
             ("Credential Coverage %", "Coverage %"),
             ("Auth Success %", "Success %"),
@@ -1313,7 +1411,7 @@ class NessusAuthDashboardGUI:
 
         middle = ttk.Frame(self.dashboard_tab)
         middle.pack(fill="both", expand=True, padx=8, pady=8)
-        self.chart_frame_left = ttk.LabelFrame(middle, text="Pass / Fail / Partial / No Credentials")
+        self.chart_frame_left = ttk.LabelFrame(middle, text="Authentication Status Breakdown")
         self.chart_frame_left.pack(side="left", fill="both", expand=True, padx=4)
         self.chart_frame_right = ttk.LabelFrame(middle, text="Top Authentication Issues and Protocols")
         self.chart_frame_right.pack(side="left", fill="both", expand=True, padx=4)
@@ -1489,11 +1587,16 @@ class NessusAuthDashboardGUI:
             client = self.make_client()
 
             authoritative_hosts: List[str] = []
+            configured_targets: List[str] = []
             try:
                 self.thread_log("Fetching scan details for authoritative host inventory...")
                 details = client.get_scan_details(scan_id, history_id or None)
                 authoritative_hosts = classifier.hosts_from_scan_details(details)
+                configured_targets = classifier.targets_from_scan_details(details)
+                classifier.configured_targets = configured_targets
                 self.thread_log(f"Host inventory from scan details: {len(authoritative_hosts)} hosts.")
+                if configured_targets:
+                    self.thread_log(f"Configured scan targets found: {len(configured_targets)} targets.")
             except Exception as exc:
                 self.thread_log(f"Could not fetch scan details; will fallback to CSV hosts. Reason: {exc}")
             self.set_progress(25)
@@ -1594,7 +1697,7 @@ class NessusAuthDashboardGUI:
             f"Scan Name: {self.data.scan_name}",
             f"Scan ID: {self.data.scan_id} | History ID: {self.data.history_id or 'latest/default'} | Generated: {self.data.generated_at}",
             "",
-            f"Rapid7-like mutually exclusive counts: Total={m.get('Total IPs',0)}, Pass={m.get('Auth Passed',0)}, Fail={m.get('Auth Failed',0)}, Partial={m.get('Partial Auth',0)}, No Credentials={m.get('No Credentials',0)}, Unknown={m.get('Unknown',0)}",
+            f"Rapid7-like mutually exclusive counts: Total={m.get('Total IPs',0)}, Pass={m.get('Auth Passed',0)}, Fail={m.get('Auth Failed',0)}, Partial={m.get('Partial Auth',0)}, No Credentials={m.get('No Credentials',0)}, Not Reachable={m.get('Not Reachable',0)}, Unknown={m.get('Unknown',0)}",
             f"Credential Coverage % = Pass + Partial / Total = {m.get('Credential Coverage %',0)}%",
             f"Auth Success % = Pass / Total = {m.get('Auth Success %',0)}%",
             "",
@@ -1697,12 +1800,14 @@ class NessusAuthDashboardGUI:
                 tree.tag_configure("FAIL", background="#7F1D1D", foreground="#FEE2E2")
                 tree.tag_configure("PARTIAL", background="#7C2D12", foreground="#FFEDD5")
                 tree.tag_configure("NOCREDS", background="#4C1D95", foreground="#EDE9FE")
+                tree.tag_configure("NOT_REACHABLE", background="#334155", foreground="#F8FAFC")
                 tree.tag_configure("UNKNOWN", background="#713F12", foreground="#FEF9C3")
             else:
                 tree.tag_configure("PASS", background="#BBF7D0", foreground="#052E16")
                 tree.tag_configure("FAIL", background="#FECACA", foreground="#450A0A")
                 tree.tag_configure("PARTIAL", background="#FED7AA", foreground="#431407")
                 tree.tag_configure("NOCREDS", background="#DDD6FE", foreground="#2E1065")
+                tree.tag_configure("NOT_REACHABLE", background="#CBD5E1", foreground="#0F172A")
                 tree.tag_configure("UNKNOWN", background="#FEF08A", foreground="#422006")
         except Exception:
             pass
@@ -1732,12 +1837,13 @@ class NessusAuthDashboardGUI:
         fig1 = Figure(figsize=(5.7, 3.8), dpi=100, facecolor=figure_bg)
         ax1 = fig1.add_subplot(111)
         ax1.set_facecolor(figure_bg)
-        labels = ["Pass", "Fail", "Partial", "No Creds", "Unknown"]
+        labels = ["Pass", "Fail", "Partial", "No Creds", "Not Reachable", "Unknown"]
         sizes = [
             data.metrics.get("Auth Passed", 0),
             data.metrics.get("Auth Failed", 0),
             data.metrics.get("Partial Auth", 0),
             data.metrics.get("No Credentials", 0),
+            data.metrics.get("Not Reachable", 0),
             data.metrics.get("Unknown", 0),
         ]
         if sum(sizes) > 0:
@@ -1746,6 +1852,7 @@ class NessusAuthDashboardGUI:
                 STATUS_COLORS[AuthStatus.FAIL],
                 STATUS_COLORS[AuthStatus.PARTIAL],
                 STATUS_COLORS[AuthStatus.NOCREDS],
+                STATUS_COLORS[AuthStatus.NOT_REACHABLE],
                 STATUS_COLORS[AuthStatus.UNKNOWN],
             ]
             ax1.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90, colors=pie_colors)
