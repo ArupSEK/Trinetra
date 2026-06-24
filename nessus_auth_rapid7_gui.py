@@ -299,6 +299,37 @@ def now_string() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def format_nessus_time(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+
+    try:
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return ""
+            if re.fullmatch(r"\d+(\.\d+)?", text):
+                value = float(text)
+            else:
+                iso_text = text.replace("Z", "+00:00")
+                parsed = dt.datetime.fromisoformat(iso_text)
+                if parsed.tzinfo:
+                    parsed = parsed.astimezone()
+                return parsed.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
+
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 10_000_000_000_000:
+                timestamp /= 1_000_000
+            elif timestamp > 10_000_000_000:
+                timestamp /= 1_000
+            return dt.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(value)
+
+    return str(value)
+
+
 def safe_int(value: Any) -> Optional[int]:
     try:
         if value is None:
@@ -1638,12 +1669,7 @@ class NessusAuthDashboardGUI:
             name = str(s.get("name", ""))
             status = str(s.get("status", ""))
             folder = str(s.get("folder_name", s.get("folder_id", "")))
-            lm = s.get("last_modification_date", "")
-            if isinstance(lm, (int, float)):
-                try:
-                    lm = dt.datetime.fromtimestamp(lm).strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    lm = str(lm)
+            lm = format_nessus_time(s.get("last_modification_date", ""))
             self.scan_tree.insert("", "end", values=(scan_id, name, status, folder, lm))
         folder_name = "selected folder"
         folder_sel = self.folder_tree.selection()
@@ -1691,11 +1717,7 @@ class NessusAuthDashboardGUI:
         history_id = str(history.get("history_id") or history.get("id") or "")
         status = str(history.get("status") or history.get("readable_status") or "history")
         timestamp = history.get("last_modification_date") or history.get("creation_date") or history.get("created_at") or ""
-        if isinstance(timestamp, (int, float)):
-            try:
-                timestamp = dt.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                timestamp = str(timestamp)
+        timestamp = format_nessus_time(timestamp)
         label = f"{timestamp or 'Saved history'} | {status}"
         if history_id:
             label = f"{label} | ID {history_id}"
