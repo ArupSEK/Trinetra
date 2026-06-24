@@ -1165,19 +1165,21 @@ class NessusAuthDashboardGUI:
         self.data: Optional[DashboardData] = None
         self.scans: List[Dict[str, Any]] = []
         self.scan_folders: List[Dict[str, Any]] = []
-        self.folder_label_to_id: Dict[str, str] = {}
+        self.scan_histories: List[Dict[str, Any]] = []
+        self.history_label_to_id: Dict[str, str] = {}
         self.dark_mode = tk.BooleanVar(value=True)
         self.verify_tls = tk.BooleanVar(value=False)
         self.base_url_var = tk.StringVar(value="https://127.0.0.1:8834")
         self.access_key_var = tk.StringVar()
         self.secret_key_var = tk.StringVar()
         self.history_id_var = tk.StringVar()
-        self.folder_filter_var = tk.StringVar()
+        self.history_filter_var = tk.StringVar()
         self.filter_text_var = tk.StringVar()
         self.filter_status_var = tk.StringVar(value="ALL")
         self.status_var = tk.StringVar(value="Ready")
         self.progress_var = tk.IntVar(value=0)
 
+        self.selected_folder_id: str = ""
         self.selected_scan_id: Optional[str] = None
         self.selected_scan_name: str = ""
         self.last_output_folder: Optional[Path] = None
@@ -1286,7 +1288,7 @@ class NessusAuthDashboardGUI:
             if widget is not None:
                 widget.configure(bg=text_bg, fg=text_fg, insertbackground=accent, relief="flat", padx=10, pady=8)
 
-        for tree_name in ("scan_tree", "host_tree", "protocol_tree", "finding_tree"):
+        for tree_name in ("folder_tree", "scan_tree", "host_tree", "protocol_tree", "finding_tree"):
             tree = getattr(self, tree_name, None)
             if tree is not None:
                 self.configure_tree_tags(tree)
@@ -1333,18 +1335,28 @@ class NessusAuthDashboardGUI:
         ttk.Button(row1, text="Test / Load Folders", command=self.load_scans_thread).pack(side="left", padx=4)
         ttk.Button(row1, text="Offline: Load CSV", command=self.load_offline_csv).pack(side="left", padx=4)
 
-        folder_row = ttk.Frame(container)
-        folder_row.pack(fill="x", padx=8, pady=(4, 2))
-        ttk.Label(folder_row, text="Folder").pack(side="left")
-        self.folder_combo = ttk.Combobox(folder_row, textvariable=self.folder_filter_var, width=42, state="readonly", values=[])
-        self.folder_combo.pack(side="left", padx=6)
-        self.folder_combo.bind("<<ComboboxSelected>>", self.on_folder_select)
-        ttk.Label(folder_row, text="Select a folder to show its scans").pack(side="left", padx=6)
-
         row2 = ttk.Frame(container)
         row2.pack(fill="both", expand=True, padx=8, pady=4)
+
+        folder_panel = ttk.Frame(row2)
+        folder_panel.pack(side="left", fill="y", padx=(0, 8))
+        ttk.Label(folder_panel, text="1. Folder", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
+        self.folder_tree = ttk.Treeview(folder_panel, columns=("name", "count", "folder_id"), displaycolumns=("name", "count"), show="headings", height=6)
+        self.folder_tree.heading("name", text="Folder")
+        self.folder_tree.heading("count", text="Scans")
+        self.folder_tree.column("name", width=240, anchor="w")
+        self.folder_tree.column("count", width=55, anchor="center")
+        self.folder_tree.pack(side="left", fill="y")
+        self.folder_tree.bind("<<TreeviewSelect>>", self.on_folder_select)
+        folder_scroll = ttk.Scrollbar(folder_panel, orient="vertical", command=self.folder_tree.yview)
+        self.folder_tree.configure(yscrollcommand=folder_scroll.set)
+        folder_scroll.pack(side="right", fill="y")
+
+        scan_panel = ttk.Frame(row2)
+        scan_panel.pack(side="left", fill="both", expand=True)
+        ttk.Label(scan_panel, text="2. Scan", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
         columns = ("id", "name", "status", "folder", "last_modification_date")
-        self.scan_tree = ttk.Treeview(row2, columns=columns, show="headings", height=5)
+        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=6)
         for col, label, width in [
             ("id", "Scan ID", 80),
             ("name", "Scan Name", 520),
@@ -1356,14 +1368,16 @@ class NessusAuthDashboardGUI:
             self.scan_tree.column(col, width=width, anchor="w")
         self.scan_tree.pack(side="left", fill="both", expand=True)
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
-        scroll = ttk.Scrollbar(row2, orient="vertical", command=self.scan_tree.yview)
+        scroll = ttk.Scrollbar(scan_panel, orient="vertical", command=self.scan_tree.yview)
         self.scan_tree.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
 
         row3 = ttk.Frame(container)
         row3.pack(fill="x", padx=8, pady=4)
-        ttk.Label(row3, text="History ID (optional; blank = latest/default)").pack(side="left")
-        ttk.Entry(row3, textvariable=self.history_id_var, width=20).pack(side="left", padx=6)
+        ttk.Label(row3, text="3. Scan History").pack(side="left")
+        self.history_combo = ttk.Combobox(row3, textvariable=self.history_filter_var, width=58, state="readonly", values=[])
+        self.history_combo.pack(side="left", padx=6)
+        self.history_combo.bind("<<ComboboxSelected>>", self.on_history_select)
         ttk.Button(row3, text="Build Dashboard", command=self.load_preview_thread).pack(side="left", padx=6)
         ttk.Button(row3, text="Clear", command=self.clear_dashboard).pack(side="left", padx=4)
 
@@ -1567,43 +1581,50 @@ class NessusAuthDashboardGUI:
             self.set_progress(0)
 
     def populate_folder_selector(self):
-        self.folder_label_to_id = {}
-        labels = []
+        for item in self.folder_tree.get_children():
+            self.folder_tree.delete(item)
+
+        first_item = ""
         for folder in self.scan_folders:
             folder_id = str(folder.get("id", ""))
             folder_name = str(folder.get("name", "") or f"Folder {folder_id}")
             count = sum(1 for scan in self.scans if str(scan.get("folder_id", "")) == folder_id)
-            label = f"{folder_name} ({count})"
-            labels.append(label)
-            self.folder_label_to_id[label] = folder_id
+            item = self.folder_tree.insert("", "end", values=(folder_name, count, folder_id))
+            if not first_item:
+                first_item = item
 
         known_folder_ids = {str(folder.get("id", "")) for folder in self.scan_folders}
         missing_folder_count = sum(1 for scan in self.scans if str(scan.get("folder_id", "")) not in known_folder_ids)
         if missing_folder_count:
-            label = f"Unfiled / Unknown Folder ({missing_folder_count})"
-            labels.append(label)
-            self.folder_label_to_id[label] = "__MISSING__"
+            item = self.folder_tree.insert("", "end", values=("Unfiled / Unknown Folder", missing_folder_count, "__MISSING__"))
+            if not first_item:
+                first_item = item
 
-        if not labels and self.scans:
-            labels = ["All Scans"]
-            self.folder_label_to_id["All Scans"] = ""
+        if not first_item and self.scans:
+            first_item = self.folder_tree.insert("", "end", values=("All Scans", len(self.scans), ""))
 
-        self.folder_combo.configure(values=labels)
-        self.folder_filter_var.set(labels[0] if labels else "")
-        self.populate_scan_tree()
+        if first_item:
+            self.folder_tree.selection_set(first_item)
+            self.folder_tree.focus(first_item)
+            self.on_folder_select()
+        else:
+            self.selected_folder_id = ""
+            self.populate_scan_tree()
 
     def on_folder_select(self, _event=None):
+        sel = self.folder_tree.selection()
+        if sel:
+            values = self.folder_tree.item(sel[0], "values")
+            self.selected_folder_id = str(values[2]) if len(values) >= 3 else ""
         self.populate_scan_tree()
-
-    def selected_folder_id(self) -> str:
-        return self.folder_label_to_id.get(self.folder_filter_var.get(), "")
 
     def populate_scan_tree(self):
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
         self.selected_scan_id = None
         self.selected_scan_name = ""
-        folder_id = self.selected_folder_id()
+        self.clear_history_selector()
+        folder_id = self.selected_folder_id
         if folder_id == "__MISSING__":
             known_folder_ids = {str(folder.get("id", "")) for folder in self.scan_folders}
             visible_scans = [s for s in self.scans if str(s.get("folder_id", "")) not in known_folder_ids]
@@ -1624,7 +1645,12 @@ class NessusAuthDashboardGUI:
                 except Exception:
                     lm = str(lm)
             self.scan_tree.insert("", "end", values=(scan_id, name, status, folder, lm))
-        folder_name = self.folder_filter_var.get() or "No folder"
+        folder_name = "selected folder"
+        folder_sel = self.folder_tree.selection()
+        if folder_sel:
+            values = self.folder_tree.item(folder_sel[0], "values")
+            if values:
+                folder_name = str(values[0])
         self.status_var.set(f"Showing {len(visible_scans)} scans in {folder_name}")
 
     def on_scan_select(self, _event=None):
@@ -1639,7 +1665,67 @@ class NessusAuthDashboardGUI:
             return
         self.selected_scan_id = str(values[0])
         self.selected_scan_name = str(values[1])
-        self.status_var.set(f"Selected scan {self.selected_scan_id}: {self.selected_scan_name}")
+        self.status_var.set(f"Selected scan {self.selected_scan_id}: {self.selected_scan_name}. Loading histories...")
+        self.clear_history_selector()
+        threading.Thread(target=self._load_histories_worker, args=(self.selected_scan_id, self.selected_scan_name), daemon=True).start()
+
+    def clear_history_selector(self):
+        self.scan_histories = []
+        self.history_label_to_id = {}
+        self.history_id_var.set("")
+        self.history_filter_var.set("")
+        if hasattr(self, "history_combo"):
+            self.history_combo.configure(values=[])
+
+    def _load_histories_worker(self, scan_id: str, scan_name: str):
+        try:
+            client = self.make_client()
+            details = client.get_scan_details(scan_id)
+            histories = details.get("history", []) or details.get("histories", []) or []
+            self.root.after(0, lambda: self.populate_history_selector(histories, scan_id, scan_name))
+        except Exception as exc:
+            self.root.after(0, lambda: self.populate_history_selector([], scan_id, scan_name))
+            self.thread_log(f"Could not load scan histories for {scan_id}: {exc}")
+
+    def history_label(self, history: Dict[str, Any]) -> Tuple[str, str]:
+        history_id = str(history.get("history_id") or history.get("id") or "")
+        status = str(history.get("status") or history.get("readable_status") or "history")
+        timestamp = history.get("last_modification_date") or history.get("creation_date") or history.get("created_at") or ""
+        if isinstance(timestamp, (int, float)):
+            try:
+                timestamp = dt.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                timestamp = str(timestamp)
+        label = f"{timestamp or 'Saved history'} | {status}"
+        if history_id:
+            label = f"{label} | ID {history_id}"
+        return label, history_id
+
+    def populate_history_selector(self, histories: List[Dict[str, Any]], scan_id: str, scan_name: str):
+        if self.selected_scan_id != scan_id:
+            return
+        self.scan_histories = histories
+        self.history_label_to_id = {}
+        labels = []
+        for history in histories:
+            label, history_id = self.history_label(history)
+            if label in self.history_label_to_id:
+                label = f"{label} #{len(labels) + 1}"
+            labels.append(label)
+            self.history_label_to_id[label] = history_id
+
+        if not labels:
+            labels = ["Latest/default history"]
+            self.history_label_to_id[labels[0]] = ""
+
+        self.history_combo.configure(values=labels)
+        self.history_filter_var.set(labels[0])
+        self.on_history_select()
+        self.status_var.set(f"Selected scan {scan_id}: {scan_name}. Choose history, then build dashboard.")
+
+    def on_history_select(self, _event=None):
+        label = self.history_filter_var.get()
+        self.history_id_var.set(self.history_label_to_id.get(label, ""))
 
     def load_preview_thread(self):
         if not self.selected_scan_id:
