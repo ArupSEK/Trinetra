@@ -162,6 +162,25 @@ STATUS_LABELS = {
     AuthStatus.UNKNOWN: "Unknown",
 }
 
+STATUS_COLORS = {
+    AuthStatus.PASS: "#22C55E",
+    AuthStatus.FAIL: "#EF4444",
+    AuthStatus.PARTIAL: "#F97316",
+    AuthStatus.NOCREDS: "#8B5CF6",
+    AuthStatus.UNKNOWN: "#EAB308",
+}
+
+METRIC_CARD_STYLES = {
+    "Total IPs": ("TotalCard.TFrame", "TotalCardTitle.TLabel", "TotalCardValue.TLabel"),
+    "Auth Passed": ("PassCard.TFrame", "PassCardTitle.TLabel", "PassCardValue.TLabel"),
+    "Auth Failed": ("FailCard.TFrame", "FailCardTitle.TLabel", "FailCardValue.TLabel"),
+    "Partial Auth": ("PartialCard.TFrame", "PartialCardTitle.TLabel", "PartialCardValue.TLabel"),
+    "No Credentials": ("NoCredsCard.TFrame", "NoCredsCardTitle.TLabel", "NoCredsCardValue.TLabel"),
+    "Unknown": ("UnknownCard.TFrame", "UnknownCardTitle.TLabel", "UnknownCardValue.TLabel"),
+    "Credential Coverage %": ("CoverageCard.TFrame", "CoverageCardTitle.TLabel", "CoverageCardValue.TLabel"),
+    "Auth Success %": ("SuccessCard.TFrame", "SuccessCardTitle.TLabel", "SuccessCardValue.TLabel"),
+}
+
 PORT_TO_AUTH_PROTOCOL = {
     22: "SSH",
     2222: "SSH",
@@ -1075,32 +1094,96 @@ class NessusAuthDashboardGUI:
     def apply_theme(self):
         dark = self.dark_mode.get()
         if dark:
-            bg = "#111827"
-            fg = "#E5E7EB"
-            panel = "#1F2937"
-            entry = "#374151"
-            header = "#0F172A"
+            bg = "#101828"
+            fg = "#F8FAFC"
+            panel = "#182235"
+            entry = "#243246"
+            header = "#0B1220"
+            accent = "#06B6D4"
+            muted = "#A5B4FC"
+            border = "#334155"
+            text_bg = "#0F172A"
+            text_fg = "#E2E8F0"
+            tab_selected = "#0E7490"
+            button_bg = "#2563EB"
+            button_active = "#1D4ED8"
+            card_palette = {
+                "Total": "#0E7490",
+                "Pass": STATUS_COLORS[AuthStatus.PASS],
+                "Fail": STATUS_COLORS[AuthStatus.FAIL],
+                "Partial": STATUS_COLORS[AuthStatus.PARTIAL],
+                "NoCreds": STATUS_COLORS[AuthStatus.NOCREDS],
+                "Unknown": STATUS_COLORS[AuthStatus.UNKNOWN],
+                "Coverage": "#14B8A6",
+                "Success": "#84CC16",
+            }
         else:
-            bg = "#F3F4F6"
-            fg = "#111827"
+            bg = "#F8FAFC"
+            fg = "#0F172A"
             panel = "#FFFFFF"
             entry = "#FFFFFF"
-            header = "#E5E7EB"
+            header = "#DBEAFE"
+            accent = "#0891B2"
+            muted = "#4F46E5"
+            border = "#CBD5E1"
+            text_bg = "#FFFFFF"
+            text_fg = "#0F172A"
+            tab_selected = "#38BDF8"
+            button_bg = "#2563EB"
+            button_active = "#1D4ED8"
+            card_palette = {
+                "Total": "#06B6D4",
+                "Pass": "#16A34A",
+                "Fail": "#DC2626",
+                "Partial": "#EA580C",
+                "NoCreds": "#7C3AED",
+                "Unknown": "#CA8A04",
+                "Coverage": "#0D9488",
+                "Success": "#65A30D",
+            }
 
         self.root.configure(bg=bg)
         self.style.configure("TFrame", background=bg)
         self.style.configure("Panel.TFrame", background=panel)
         self.style.configure("TLabel", background=bg, foreground=fg)
         self.style.configure("Panel.TLabel", background=panel, foreground=fg)
-        self.style.configure("Header.TLabel", background=bg, foreground=fg, font=("Segoe UI", 16, "bold"))
+        self.style.configure("Header.TLabel", background=bg, foreground=accent, font=("Segoe UI", 16, "bold"))
         self.style.configure("Card.TFrame", background=panel, relief="ridge", borderwidth=1)
-        self.style.configure("CardTitle.TLabel", background=panel, foreground="#9CA3AF", font=("Segoe UI", 10, "bold"))
+        self.style.configure("CardTitle.TLabel", background=panel, foreground=muted, font=("Segoe UI", 10, "bold"))
         self.style.configure("CardValue.TLabel", background=panel, foreground=fg, font=("Segoe UI", 24, "bold"))
-        self.style.configure("TButton", padding=6)
+        self.style.configure("TButton", padding=6, background=button_bg, foreground="#FFFFFF", bordercolor=button_bg)
+        self.style.map("TButton", background=[("active", button_active), ("pressed", button_active)], foreground=[("disabled", "#94A3B8")])
+        self.style.configure("TCheckbutton", background=bg, foreground=fg)
+        self.style.configure("TEntry", fieldbackground=entry, foreground=fg, bordercolor=border)
+        self.style.configure("TCombobox", fieldbackground=entry, foreground=fg, background=entry, arrowcolor=accent)
+        self.style.configure("TLabelFrame", background=bg, foreground=accent, bordercolor=border)
+        self.style.configure("TLabelFrame.Label", background=bg, foreground=accent, font=("Segoe UI", 9, "bold"))
         self.style.configure("Treeview", background=entry, foreground=fg, fieldbackground=entry, rowheight=26)
-        self.style.configure("Treeview.Heading", background=header, foreground=fg, font=("Segoe UI", 9, "bold"))
+        self.style.configure("Treeview.Heading", background=header, foreground=fg, font=("Segoe UI", 9, "bold"), bordercolor=accent)
         self.style.configure("TNotebook", background=bg)
-        self.style.configure("TNotebook.Tab", padding=[10, 5])
+        self.style.configure("TNotebook.Tab", padding=[10, 5], background=panel, foreground=fg)
+        self.style.map("TNotebook.Tab", background=[("selected", tab_selected)], foreground=[("selected", "#FFFFFF")])
+        self.style.configure("Horizontal.TProgressbar", troughcolor=panel, background=accent, bordercolor=border, lightcolor=accent, darkcolor=accent)
+
+        card_names = ["Total", "Pass", "Fail", "Partial", "NoCreds", "Unknown", "Coverage", "Success"]
+        for name in card_names:
+            color = card_palette[name]
+            self.style.configure(f"{name}Card.TFrame", background=color, relief="flat")
+            self.style.configure(f"{name}CardTitle.TLabel", background=color, foreground="#FFFFFF", font=("Segoe UI", 10, "bold"))
+            self.style.configure(f"{name}CardValue.TLabel", background=color, foreground="#FFFFFF", font=("Segoe UI", 24, "bold"))
+
+        for widget_name in ("summary_text", "drill_text", "log_text"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(bg=text_bg, fg=text_fg, insertbackground=accent, relief="flat", padx=10, pady=8)
+
+        for tree_name in ("scan_tree", "host_tree", "protocol_tree", "finding_tree"):
+            tree = getattr(self, tree_name, None)
+            if tree is not None:
+                self.configure_tree_tags(tree)
+
+        if getattr(self, "data", None):
+            self.draw_charts()
 
     def build_ui(self):
         self.build_top_bar()
@@ -1216,10 +1299,14 @@ class NessusAuthDashboardGUI:
             ("Auth Success %", "Success %"),
         ]
         for metric_key, title in card_defs:
-            card = ttk.Frame(top, style="Card.TFrame")
+            frame_style, title_style, value_style = METRIC_CARD_STYLES.get(
+                metric_key,
+                ("Card.TFrame", "CardTitle.TLabel", "CardValue.TLabel"),
+            )
+            card = ttk.Frame(top, style=frame_style)
             card.pack(side="left", fill="x", expand=True, padx=4)
-            ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w", padx=10, pady=(8, 0))
-            lbl = ttk.Label(card, text="0", style="CardValue.TLabel")
+            ttk.Label(card, text=title, style=title_style).pack(anchor="w", padx=10, pady=(8, 0))
+            lbl = ttk.Label(card, text="0", style=value_style)
             lbl.pack(anchor="w", padx=10, pady=(0, 8))
             self.card_labels[metric_key] = lbl
 
@@ -1598,11 +1685,18 @@ class NessusAuthDashboardGUI:
 
     def configure_tree_tags(self, tree: ttk.Treeview):
         try:
-            tree.tag_configure("PASS", background="#C6EFCE", foreground="#000000")
-            tree.tag_configure("FAIL", background="#FFC7CE", foreground="#000000")
-            tree.tag_configure("PARTIAL", background="#FCE4D6", foreground="#000000")
-            tree.tag_configure("NOCREDS", background="#E7E6E6", foreground="#000000")
-            tree.tag_configure("UNKNOWN", background="#FFF2CC", foreground="#000000")
+            if self.dark_mode.get():
+                tree.tag_configure("PASS", background="#14532D", foreground="#DCFCE7")
+                tree.tag_configure("FAIL", background="#7F1D1D", foreground="#FEE2E2")
+                tree.tag_configure("PARTIAL", background="#7C2D12", foreground="#FFEDD5")
+                tree.tag_configure("NOCREDS", background="#4C1D95", foreground="#EDE9FE")
+                tree.tag_configure("UNKNOWN", background="#713F12", foreground="#FEF9C3")
+            else:
+                tree.tag_configure("PASS", background="#BBF7D0", foreground="#052E16")
+                tree.tag_configure("FAIL", background="#FECACA", foreground="#450A0A")
+                tree.tag_configure("PARTIAL", background="#FED7AA", foreground="#431407")
+                tree.tag_configure("NOCREDS", background="#DDD6FE", foreground="#2E1065")
+                tree.tag_configure("UNKNOWN", background="#FEF08A", foreground="#422006")
         except Exception:
             pass
 
@@ -1624,8 +1718,13 @@ class NessusAuthDashboardGUI:
         self.clear_charts()
         data = self.data
 
-        fig1 = Figure(figsize=(5.7, 3.8), dpi=100)
+        dark = self.dark_mode.get()
+        figure_bg = "#182235" if dark else "#FFFFFF"
+        axis_fg = "#E2E8F0" if dark else "#0F172A"
+
+        fig1 = Figure(figsize=(5.7, 3.8), dpi=100, facecolor=figure_bg)
         ax1 = fig1.add_subplot(111)
+        ax1.set_facecolor(figure_bg)
         labels = ["Pass", "Fail", "Partial", "No Creds", "Unknown"]
         sizes = [
             data.metrics.get("Auth Passed", 0),
@@ -1635,15 +1734,24 @@ class NessusAuthDashboardGUI:
             data.metrics.get("Unknown", 0),
         ]
         if sum(sizes) > 0:
-            ax1.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
+            pie_colors = [
+                STATUS_COLORS[AuthStatus.PASS],
+                STATUS_COLORS[AuthStatus.FAIL],
+                STATUS_COLORS[AuthStatus.PARTIAL],
+                STATUS_COLORS[AuthStatus.NOCREDS],
+                STATUS_COLORS[AuthStatus.UNKNOWN],
+            ]
+            ax1.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90, colors=pie_colors)
         ax1.set_title("Authentication Status")
+        ax1.title.set_color(axis_fg)
         fig1.tight_layout()
         self.chart_canvas_left = FigureCanvasTkAgg(fig1, master=self.chart_frame_left)
         self.chart_canvas_left.draw()
         self.chart_canvas_left.get_tk_widget().pack(fill="both", expand=True)
 
-        fig2 = Figure(figsize=(5.7, 3.8), dpi=100)
+        fig2 = Figure(figsize=(5.7, 3.8), dpi=100, facecolor=figure_bg)
         ax2 = fig2.add_subplot(111)
+        ax2.set_facecolor(figure_bg)
         reason_counts = Counter()
         protocol_issue_counts = Counter()
         for h in data.host_records:
@@ -1656,16 +1764,22 @@ class NessusAuthDashboardGUI:
             items = reason_counts.most_common(8)
             names = [x[0] for x in items][::-1]
             counts = [x[1] for x in items][::-1]
-            ax2.barh(names, counts)
+            ax2.barh(names, counts, color="#EF4444")
             ax2.set_xlabel("Host Count")
             ax2.set_title("Top Auth Issues")
         else:
             items = protocol_issue_counts.most_common(8)
             names = [x[0] for x in items][::-1]
             counts = [x[1] for x in items][::-1]
-            ax2.barh(names, counts)
+            ax2.barh(names, counts, color="#06B6D4")
             ax2.set_xlabel("Count")
             ax2.set_title("Protocol Issues")
+        ax2.title.set_color(axis_fg)
+        ax2.xaxis.label.set_color(axis_fg)
+        ax2.tick_params(axis="x", colors=axis_fg)
+        ax2.tick_params(axis="y", colors=axis_fg)
+        for spine in ax2.spines.values():
+            spine.set_color(axis_fg)
         fig2.tight_layout()
         self.chart_canvas_right = FigureCanvasTkAgg(fig2, master=self.chart_frame_right)
         self.chart_canvas_right.draw()
