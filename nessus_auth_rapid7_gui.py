@@ -236,6 +236,8 @@ class AuthFinding:
     severity: str = ""
     risk: str = ""
     source: str = "csv"
+    scan_id: str = ""
+    scan_name: str = ""
 
     @property
     def reason(self) -> str:
@@ -263,6 +265,8 @@ class ProtocolStatusRecord:
     reasons: List[str] = field(default_factory=list)
     accounts: List[str] = field(default_factory=list)
     ports: List[str] = field(default_factory=list)
+    scan_ids: List[str] = field(default_factory=list)
+    scan_names: List[str] = field(default_factory=list)
     confidence: str = "High"
     evidence_count: int = 0
 
@@ -275,6 +279,8 @@ class HostStatusRecord:
     plugin_ids: List[int] = field(default_factory=list)
     reasons: List[str] = field(default_factory=list)
     accounts: List[str] = field(default_factory=list)
+    scan_ids: List[str] = field(default_factory=list)
+    scan_names: List[str] = field(default_factory=list)
     recommendation: str = ""
     pass_protocols: List[str] = field(default_factory=list)
     fail_protocols: List[str] = field(default_factory=list)
@@ -621,8 +627,32 @@ class AuthClassifier:
     def __init__(self):
         self.notes: List[str] = []
         self.configured_targets: List[str] = []
+        self.host_source_ids: Dict[str, List[str]] = defaultdict(list)
+        self.host_source_names: Dict[str, List[str]] = defaultdict(list)
+        self.target_source_ids: Dict[str, List[str]] = defaultdict(list)
+        self.target_source_names: Dict[str, List[str]] = defaultdict(list)
 
-    def parse_csv(self, csv_path: Path) -> Tuple[List[Dict[str, Any]], List[AuthFinding], List[str]]:
+    def remember_host_sources(self, hosts: Iterable[str], scan_id: str, scan_name: str) -> None:
+        for host in hosts:
+            host = str(host or "").strip()
+            if not host:
+                continue
+            if scan_id and scan_id not in self.host_source_ids[host]:
+                self.host_source_ids[host].append(scan_id)
+            if scan_name and scan_name not in self.host_source_names[host]:
+                self.host_source_names[host].append(scan_name)
+
+    def remember_target_sources(self, hosts: Iterable[str], scan_id: str, scan_name: str) -> None:
+        for host in hosts:
+            host = str(host or "").strip()
+            if not host:
+                continue
+            if scan_id and scan_id not in self.target_source_ids[host]:
+                self.target_source_ids[host].append(scan_id)
+            if scan_name and scan_name not in self.target_source_names[host]:
+                self.target_source_names[host].append(scan_name)
+
+    def parse_csv(self, csv_path: Path, scan_id: str = "", scan_name: str = "") -> Tuple[List[Dict[str, Any]], List[AuthFinding], List[str]]:
         raw_rows: List[Dict[str, Any]] = []
         findings: List[AuthFinding] = []
         all_hosts: List[str] = []
@@ -675,6 +705,8 @@ class AuthClassifier:
                         severity=severity,
                         risk=risk,
                         source=str(csv_path),
+                        scan_id=scan_id,
+                        scan_name=scan_name,
                     ))
 
         return raw_rows, findings, sort_hosts(all_hosts)
@@ -749,6 +781,8 @@ class AuthClassifier:
             reasons=unique_preserve_order([f.reason for f in findings]),
             accounts=unique_preserve_order([f.account for f in findings]),
             ports=unique_preserve_order([str(f.port) for f in findings if f.port is not None]),
+            scan_ids=unique_preserve_order([f.scan_id for f in findings]),
+            scan_names=unique_preserve_order([f.scan_name for f in findings]),
             confidence=confidence,
             evidence_count=len(findings),
         )
@@ -793,18 +827,24 @@ class AuthClassifier:
                 plugin_ids = []
                 reasons = ["Configured scan target did not appear in Nessus host inventory or CSV results"]
                 accounts = []
+                scan_ids = unique_preserve_order(self.target_source_ids.get(host, []))
+                scan_names = unique_preserve_order(self.target_source_names.get(host, []))
             elif not protos:
                 status = AuthStatus.UNKNOWN
                 proto_status_map = {}
                 plugin_ids: List[int] = []
                 reasons = ["No authentication evidence found in scan export"]
                 accounts: List[str] = []
+                scan_ids = unique_preserve_order(self.host_source_ids.get(host, []) + self.target_source_ids.get(host, []))
+                scan_names = unique_preserve_order(self.host_source_names.get(host, []) + self.target_source_names.get(host, []))
             else:
                 proto_status_map = {p.auth_protocol: p.status for p in protos}
                 decisive_states = {p.status for p in protos if p.status != AuthStatus.UNKNOWN}
                 plugin_ids = sorted(set(pid for p in protos for pid in p.plugin_ids))
                 reasons = unique_preserve_order([r for p in protos for r in p.reasons])
                 accounts = unique_preserve_order([a for p in protos for a in p.accounts])
+                scan_ids = unique_preserve_order([sid for p in protos for sid in p.scan_ids])
+                scan_names = unique_preserve_order([name for p in protos for name in p.scan_names])
 
                 if not decisive_states:
                     status = AuthStatus.UNKNOWN
@@ -828,6 +868,8 @@ class AuthClassifier:
                 plugin_ids=plugin_ids,
                 reasons=reasons,
                 accounts=accounts,
+                scan_ids=scan_ids,
+                scan_names=scan_names,
                 recommendation=RECOMMENDATION_BY_STATUS.get(status, "Review evidence."),
                 pass_protocols=sorted([p.auth_protocol for p in protos if p.status == AuthStatus.PASS]),
                 fail_protocols=sorted([p.auth_protocol for p in protos if p.status == AuthStatus.FAIL]),
@@ -889,6 +931,8 @@ class Exporter:
         for h in data.host_records:
             rows.append({
                 "Host": h.host,
+                "Source Scan IDs": ", ".join(h.scan_ids),
+                "Source Scan Names": ", ".join(h.scan_names),
                 "Status": h.status.value,
                 "Pass Protocols": ", ".join(h.pass_protocols),
                 "Fail Protocols": ", ".join(h.fail_protocols),
@@ -908,6 +952,8 @@ class Exporter:
         for p in data.protocol_records:
             rows.append({
                 "Host": p.host,
+                "Source Scan IDs": ", ".join(p.scan_ids),
+                "Source Scan Names": ", ".join(p.scan_names),
                 "Auth Protocol": p.auth_protocol,
                 "Status": p.status.value,
                 "Plugin IDs": ", ".join(map(str, p.plugin_ids)),
@@ -925,6 +971,8 @@ class Exporter:
         for f in data.findings:
             rows.append({
                 "Host": f.host,
+                "Source Scan ID": f.scan_id,
+                "Source Scan Name": f.scan_name,
                 "Auth Protocol": f.auth_protocol,
                 "Plugin ID": f.plugin_id,
                 "Plugin Name": f.plugin_name,
@@ -1777,25 +1825,25 @@ class NessusAuthDashboardGUI:
         return tree
 
     def build_hosts_tab(self):
-        columns = ("Host", "Status", "Pass", "Fail", "Partial", "NoCreds", "Unknown", "Plugin IDs", "Reason", "Recommendation")
+        columns = ("Host", "Source Scans", "Status", "Pass", "Fail", "Partial", "NoCreds", "Unknown", "Plugin IDs", "Reason", "Recommendation")
         headings = {c: c for c in columns}
         widths = {
-            "Host": 150, "Status": 90, "Pass": 120, "Fail": 120, "Partial": 120, "NoCreds": 120,
+            "Host": 150, "Source Scans": 220, "Status": 90, "Pass": 120, "Fail": 120, "Partial": 120, "NoCreds": 120,
             "Unknown": 120, "Plugin IDs": 150, "Reason": 300, "Recommendation": 420
         }
         self.host_tree = self.build_tree_with_scroll(self.hosts_tab, columns, headings, widths)
         self.host_tree.bind("<<TreeviewSelect>>", self.on_host_select)
 
     def build_protocols_tab(self):
-        columns = ("Host", "Auth Protocol", "Status", "Plugin IDs", "Reasons", "Accounts", "Ports", "Confidence", "Evidence Count")
+        columns = ("Host", "Source Scans", "Auth Protocol", "Status", "Plugin IDs", "Reasons", "Accounts", "Ports", "Confidence", "Evidence Count")
         headings = {c: c for c in columns}
-        widths = {"Host": 150, "Auth Protocol": 120, "Status": 90, "Plugin IDs": 150, "Reasons": 360, "Accounts": 180, "Ports": 120, "Confidence": 180, "Evidence Count": 110}
+        widths = {"Host": 150, "Source Scans": 220, "Auth Protocol": 120, "Status": 90, "Plugin IDs": 150, "Reasons": 360, "Accounts": 180, "Ports": 120, "Confidence": 180, "Evidence Count": 110}
         self.protocol_tree = self.build_tree_with_scroll(self.protocols_tab, columns, headings, widths)
 
     def build_findings_tab(self):
-        columns = ("Host", "Auth Protocol", "Plugin ID", "Plugin Name", "Evidence Type", "Reason", "Port", "Account")
+        columns = ("Host", "Source Scan", "Auth Protocol", "Plugin ID", "Plugin Name", "Evidence Type", "Reason", "Port", "Account")
         headings = {c: c for c in columns}
-        widths = {"Host": 150, "Auth Protocol": 120, "Plugin ID": 90, "Plugin Name": 350, "Evidence Type": 160, "Reason": 330, "Port": 80, "Account": 180}
+        widths = {"Host": 150, "Source Scan": 220, "Auth Protocol": 120, "Plugin ID": 90, "Plugin Name": 350, "Evidence Type": 160, "Reason": 330, "Port": 80, "Account": 180}
         self.finding_tree = self.build_tree_with_scroll(self.findings_tab, columns, headings, widths)
         self.finding_tree.bind("<<TreeviewSelect>>", self.on_finding_select)
 
@@ -2084,8 +2132,12 @@ class NessusAuthDashboardGUI:
                     self.thread_log(f"[{index}/{total_scans}] Fetching scan details for {scan_id}: {scan_name or scan_id}")
                     try:
                         details = client.get_scan_details(scan_id, current_history_id or None)
-                        authoritative_hosts.extend(classifier.hosts_from_scan_details(details))
-                        configured_targets.extend(classifier.targets_from_scan_details(details))
+                        detail_hosts = classifier.hosts_from_scan_details(details)
+                        detail_targets = classifier.targets_from_scan_details(details)
+                        authoritative_hosts.extend(detail_hosts)
+                        configured_targets.extend(detail_targets)
+                        classifier.remember_host_sources(detail_hosts, scan_id, scan_name or scan_id)
+                        classifier.remember_target_sources(detail_targets, scan_id, scan_name or scan_id)
                         self.thread_log(f"[{index}/{total_scans}] Host inventory loaded.")
                     except Exception as exc:
                         self.thread_log(f"[{index}/{total_scans}] Could not fetch scan details; will fallback to CSV hosts. Reason: {exc}")
@@ -2093,8 +2145,9 @@ class NessusAuthDashboardGUI:
                     self.set_progress(10 + int(index / total_scans * 20))
                     csv_path = Path(tmpdir) / f"nessus_scan_{scan_id}_preview.csv"
                     client.export_scan_csv(scan_id, csv_path, current_history_id or None, progress_cb=self.thread_log)
-                    raw_rows, findings, csv_hosts = classifier.parse_csv(csv_path)
+                    raw_rows, findings, csv_hosts = classifier.parse_csv(csv_path, scan_id=scan_id, scan_name=scan_name or scan_id)
                     authoritative_hosts.extend(csv_hosts)
+                    classifier.remember_host_sources(csv_hosts, scan_id, scan_name or scan_id)
                     all_findings.extend(findings)
                     raw_rows_count += len(raw_rows)
                     self.thread_log(f"[{index}/{total_scans}] Parsed {len(raw_rows)} raw rows and {len(findings)} auth-related findings.")
@@ -2134,7 +2187,8 @@ class NessusAuthDashboardGUI:
             return
         try:
             classifier = AuthClassifier()
-            raw_rows, findings, csv_hosts = classifier.parse_csv(Path(path))
+            raw_rows, findings, csv_hosts = classifier.parse_csv(Path(path), scan_id="offline", scan_name=Path(path).stem)
+            classifier.remember_host_sources(csv_hosts, "offline", Path(path).stem)
             data = classifier.classify(
                 scan_name=Path(path).stem,
                 scan_id="offline",
@@ -2220,11 +2274,12 @@ class NessusAuthDashboardGUI:
         for h in self.data.host_records:
             if filter_status != "ALL" and h.status.value != filter_status:
                 continue
-            searchable = " ".join([h.host, h.status.value, " ".join(h.reasons), " ".join(map(str, h.plugin_ids))]).lower()
+            searchable = " ".join([h.host, h.status.value, " ".join(h.scan_names), " ".join(h.scan_ids), " ".join(h.reasons), " ".join(map(str, h.plugin_ids))]).lower()
             if filter_text and filter_text not in searchable:
                 continue
             vals = (
                 h.host,
+                ", ".join(h.scan_names or h.scan_ids),
                 h.status.value,
                 ", ".join(h.pass_protocols),
                 ", ".join(h.fail_protocols),
@@ -2246,6 +2301,7 @@ class NessusAuthDashboardGUI:
         for p in self.data.protocol_records:
             vals = (
                 p.host,
+                ", ".join(p.scan_names or p.scan_ids),
                 p.auth_protocol,
                 p.status.value,
                 ", ".join(map(str, p.plugin_ids)),
@@ -2266,6 +2322,7 @@ class NessusAuthDashboardGUI:
         for f in self.data.findings:
             vals = (
                 f.host,
+                f.scan_name or f.scan_id or f.source,
                 f.auth_protocol,
                 f.plugin_id,
                 f.plugin_name,
@@ -2414,18 +2471,21 @@ class NessusAuthDashboardGUI:
         related_findings = [f for f in self.data.findings if f.host == host]
         lines = [
             f"Host: {hrec.host}",
+            f"Source Scans: {', '.join(hrec.scan_names or hrec.scan_ids) or 'N/A'}",
             f"Final Status: {hrec.status.value}",
             f"Recommendation: {hrec.recommendation}",
             "",
             "Protocol Status:",
         ]
         for p in related_protocols:
-            lines.append(f"  - {p.auth_protocol}: {p.status.value} | Plugins: {', '.join(map(str,p.plugin_ids))} | Reasons: {' | '.join(p.reasons)}")
+            source = ", ".join(p.scan_names or p.scan_ids) or "N/A"
+            lines.append(f"  - {p.auth_protocol}: {p.status.value} | Source: {source} | Plugins: {', '.join(map(str,p.plugin_ids))} | Reasons: {' | '.join(p.reasons)}")
         if not related_protocols:
             lines.append("  - No protocol-level authentication evidence found.")
         lines.extend(["", "Raw Evidence:"])
         for f in related_findings[:25]:
             lines.append("=" * 90)
+            lines.append(f"Source Scan: {f.scan_name or 'N/A'} ({f.scan_id or 'no scan id'})")
             lines.append(f"Plugin {f.plugin_id} - {f.plugin_name}")
             lines.append(f"Protocol: {f.auth_protocol} | Port: {f.port or ''} | Account: {f.account or ''}")
             lines.append(f"Reason: {f.reason}")
@@ -2444,18 +2504,26 @@ class NessusAuthDashboardGUI:
         if not sel:
             return
         values = self.finding_tree.item(sel[0], "values")
-        if len(values) < 3:
+        if len(values) < 4:
             return
         host = str(values[0])
-        plugin_id = safe_int(values[2])
+        source_scan = str(values[1])
+        plugin_id = safe_int(values[3])
         if plugin_id is None:
             return
-        candidates = [f for f in self.data.findings if f.host == host and f.plugin_id == plugin_id]
+        candidates = [
+            f for f in self.data.findings
+            if f.host == host and f.plugin_id == plugin_id and source_scan in {f.scan_name, f.scan_id, f.source}
+        ]
+        if not candidates:
+            candidates = [f for f in self.data.findings if f.host == host and f.plugin_id == plugin_id]
         if not candidates:
             return
         f = candidates[0]
         lines = [
             f"Host: {f.host}",
+            f"Source Scan: {f.scan_name or 'N/A'}",
+            f"Source Scan ID: {f.scan_id or 'N/A'}",
             f"Plugin ID: {f.plugin_id}",
             f"Plugin Name: {f.plugin_name}",
             f"Auth Protocol: {f.auth_protocol}",
