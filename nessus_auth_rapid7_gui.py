@@ -1327,7 +1327,7 @@ class LoginDialog:
         tk.Label(form, text="TRINETRA", bg="#F8FAFC", fg="#0F766E", font=("Segoe UI", 20, "bold")).pack(anchor="w")
         tk.Label(
             form,
-            text="Nessus Credential Assurance",
+            text="Trinetra Credential Assurance",
             bg="#F8FAFC",
             fg="#334155",
             font=("Segoe UI", 10, "bold"),
@@ -1514,6 +1514,7 @@ class NessusAuthDashboardGUI:
         self.history_filter_var = tk.StringVar()
         self.filter_text_var = tk.StringVar()
         self.filter_status_var = tk.StringVar(value="ALL")
+        self.selected_scan_count_var = tk.StringVar(value="Selected scans: 0")
         self.status_var = tk.StringVar(value="Ready")
         self.progress_var = tk.IntVar(value=0)
 
@@ -1662,17 +1663,20 @@ class NessusAuthDashboardGUI:
         container = ttk.LabelFrame(self.root, text="Connection and Scan Selection")
         container.pack(fill="x", padx=10, pady=4)
 
-        row1 = ttk.Frame(container)
-        row1.pack(fill="x", padx=8, pady=4)
-        ttk.Label(row1, text="Base URL").pack(side="left")
-        ttk.Entry(row1, textvariable=self.base_url_var, width=32).pack(side="left", padx=5)
-        ttk.Label(row1, text="Access Key").pack(side="left")
-        ttk.Entry(row1, textvariable=self.access_key_var, width=38, show="*").pack(side="left", padx=5)
-        ttk.Label(row1, text="Secret Key").pack(side="left")
-        ttk.Entry(row1, textvariable=self.secret_key_var, width=38, show="*").pack(side="left", padx=5)
-        ttk.Checkbutton(row1, text="Verify TLS", variable=self.verify_tls).pack(side="left", padx=6)
-        ttk.Button(row1, text="Test / Load Folders", command=self.load_scans_thread).pack(side="left", padx=4)
-        ttk.Button(row1, text="Offline: Load CSV", command=self.load_offline_csv).pack(side="left", padx=4)
+        connection_row = ttk.Frame(container)
+        connection_row.pack(fill="x", padx=8, pady=(4, 2))
+        ttk.Label(connection_row, text="Base URL").pack(side="left")
+        ttk.Entry(connection_row, textvariable=self.base_url_var, width=34).pack(side="left", padx=5)
+        ttk.Checkbutton(connection_row, text="Verify TLS", variable=self.verify_tls).pack(side="left", padx=6)
+        ttk.Button(connection_row, text="Test / Load Folders", command=self.load_scans_thread).pack(side="left", padx=4)
+        ttk.Button(connection_row, text="Offline: Load CSV", command=self.load_offline_csv).pack(side="left", padx=4)
+
+        credential_row = ttk.Frame(container)
+        credential_row.pack(fill="x", padx=8, pady=(2, 4))
+        ttk.Label(credential_row, text="Access Key").pack(side="left")
+        ttk.Entry(credential_row, textvariable=self.access_key_var, width=48, show="*").pack(side="left", padx=5)
+        ttk.Label(credential_row, text="Secret Key").pack(side="left")
+        ttk.Entry(credential_row, textvariable=self.secret_key_var, width=48, show="*").pack(side="left", padx=5)
 
         row2 = ttk.Frame(container)
         row2.pack(fill="both", expand=True, padx=8, pady=4)
@@ -1715,6 +1719,7 @@ class NessusAuthDashboardGUI:
         row3.pack(fill="x", padx=8, pady=4)
         ttk.Button(row3, text="Select All Visible Scans", command=self.select_all_visible_scans).pack(side="left", padx=(0, 6))
         ttk.Button(row3, text="Clear Scan Selection", command=self.clear_scan_selection).pack(side="left", padx=(0, 12))
+        ttk.Label(row3, textvariable=self.selected_scan_count_var, style="Panel.TLabel").pack(side="left", padx=(0, 14))
         ttk.Label(row3, text="3. Scan History").pack(side="left")
         self.history_combo = ttk.Combobox(row3, textvariable=self.history_filter_var, width=58, state="readonly", values=[])
         self.history_combo.pack(side="left", padx=6)
@@ -1725,20 +1730,25 @@ class NessusAuthDashboardGUI:
     def build_action_bar(self):
         frame = ttk.Frame(self.root)
         frame.pack(fill="x", padx=10, pady=4)
-        ttk.Label(frame, text="Search").pack(side="left")
-        entry = ttk.Entry(frame, textvariable=self.filter_text_var, width=35)
+        filter_group = ttk.Frame(frame)
+        filter_group.pack(side="left", fill="x", expand=True)
+        ttk.Label(filter_group, text="Search").pack(side="left")
+        entry = ttk.Entry(filter_group, textvariable=self.filter_text_var, width=35)
         entry.pack(side="left", padx=5)
         entry.bind("<KeyRelease>", lambda _e: self.refresh_host_table())
-        ttk.Label(frame, text="Status").pack(side="left")
-        status_combo = ttk.Combobox(frame, textvariable=self.filter_status_var, width=14, state="readonly",
+        ttk.Label(filter_group, text="Status").pack(side="left")
+        status_combo = ttk.Combobox(filter_group, textvariable=self.filter_status_var, width=14, state="readonly",
                                     values=["ALL"] + [s.value for s in STATUS_ORDER])
         status_combo.pack(side="left", padx=5)
         status_combo.bind("<<ComboboxSelected>>", lambda _e: self.refresh_host_table())
-        ttk.Button(frame, text="Export Excel", command=self.export_excel).pack(side="right", padx=3)
-        ttk.Button(frame, text="Export PDF", command=self.export_pdf).pack(side="right", padx=3)
-        ttk.Button(frame, text="Export CSV Bundle", command=self.export_csv_bundle).pack(side="right", padx=3)
-        ttk.Button(frame, text="Copy Failed IPs", command=lambda: self.copy_ips(AuthStatus.FAIL)).pack(side="right", padx=3)
-        ttk.Button(frame, text="Open Output Folder", command=self.open_output_folder).pack(side="right", padx=3)
+
+        export_group = ttk.Frame(frame)
+        export_group.pack(side="right")
+        ttk.Button(export_group, text="Export Excel", command=self.export_excel).pack(side="left", padx=3)
+        ttk.Button(export_group, text="Export PDF", command=self.export_pdf).pack(side="left", padx=3)
+        ttk.Button(export_group, text="Export CSV Bundle", command=self.export_csv_bundle).pack(side="left", padx=3)
+        ttk.Button(export_group, text="Copy Failed IPs", command=lambda: self.copy_ips(AuthStatus.FAIL)).pack(side="left", padx=3)
+        ttk.Button(export_group, text="Open Output Folder", command=self.open_output_folder).pack(side="left", padx=3)
 
     def build_dashboard_tabs(self):
         self.notebook = ttk.Notebook(self.root)
@@ -1768,6 +1778,8 @@ class NessusAuthDashboardGUI:
     def build_dashboard_tab(self):
         top = ttk.Frame(self.dashboard_tab)
         top.pack(fill="x", padx=8, pady=8)
+        for col in range(5):
+            top.columnconfigure(col, weight=1, uniform="metric_cards")
         self.card_labels: Dict[str, tk.Label] = {}
         card_defs = [
             ("Total IPs", "Total IPs"),
@@ -1780,13 +1792,13 @@ class NessusAuthDashboardGUI:
             ("Credential Coverage %", "Coverage %"),
             ("Auth Success %", "Success %"),
         ]
-        for metric_key, title in card_defs:
+        for idx, (metric_key, title) in enumerate(card_defs):
             frame_style, title_style, value_style = METRIC_CARD_STYLES.get(
                 metric_key,
                 ("Card.TFrame", "CardTitle.TLabel", "CardValue.TLabel"),
             )
             card = ttk.Frame(top, style=frame_style)
-            card.pack(side="left", fill="x", expand=True, padx=4)
+            card.grid(row=idx // 5, column=idx % 5, sticky="ew", padx=4, pady=4)
             ttk.Label(card, text=title, style=title_style).pack(anchor="w", padx=10, pady=(8, 0))
             lbl = ttk.Label(card, text="0", style=value_style)
             lbl.pack(anchor="w", padx=10, pady=(0, 8))
@@ -1959,12 +1971,17 @@ class NessusAuthDashboardGUI:
             self.selected_folder_id = str(values[2]) if len(values) >= 3 else ""
         self.populate_scan_tree()
 
+    def update_selected_scan_count(self):
+        count = len(self.selected_scans)
+        self.selected_scan_count_var.set(f"Selected scans: {count}")
+
     def populate_scan_tree(self):
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
         self.selected_scan_id = None
         self.selected_scan_name = ""
         self.selected_scans = []
+        self.update_selected_scan_count()
         self.clear_history_selector()
         folder_id = self.selected_folder_id
         if folder_id == "__MISSING__":
@@ -1996,6 +2013,7 @@ class NessusAuthDashboardGUI:
             self.selected_scan_id = None
             self.selected_scan_name = ""
             self.selected_scans = []
+            self.update_selected_scan_count()
             self.clear_history_selector()
             return
 
@@ -2006,6 +2024,7 @@ class NessusAuthDashboardGUI:
                 selected_scans.append((str(values[0]), str(values[1])))
 
         self.selected_scans = selected_scans
+        self.update_selected_scan_count()
         if not selected_scans:
             self.selected_scan_id = None
             self.selected_scan_name = ""
@@ -2016,7 +2035,9 @@ class NessusAuthDashboardGUI:
             self.selected_scan_id = None
             self.selected_scan_name = ""
             self.clear_history_selector()
-            self.history_filter_var.set("Latest/default history for each selected scan")
+            multi_history_label = "Latest/default history for each selected scan"
+            self.history_combo.configure(values=[multi_history_label])
+            self.history_filter_var.set(multi_history_label)
             self.status_var.set(f"Selected {len(selected_scans)} scans. Build Dashboard will merge latest/default results.")
             return
 
@@ -2037,6 +2058,7 @@ class NessusAuthDashboardGUI:
         self.selected_scan_id = None
         self.selected_scan_name = ""
         self.selected_scans = []
+        self.update_selected_scan_count()
         self.clear_history_selector()
         self.status_var.set("Scan selection cleared.")
 

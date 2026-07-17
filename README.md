@@ -13,6 +13,10 @@
 
 ---
 
+**Search keywords:** Nessus credentialed scan, Nessus CA scan, credential assurance, authentication validation, failed credentials, partial authentication, vulnerability assessment, VAPT reporting, Nessus Excel report, Nessus PDF report, security dashboard.
+
+---
+
 ## 📌 About the Application
 
 **Trinetra** is a Python-based desktop GUI application that helps security engineers and VAPT teams quickly validate whether Nessus credentialed scans were successful or not.
