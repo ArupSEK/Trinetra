@@ -1,4 +1,4 @@
-# 🛡️ Nessus Credential Assurance Dashboard
+# 🛡️ Trinetra
 
 <p align="center">
   <b>Professional GUI dashboard for Nessus credentialed-scan validation, authentication coverage, failed credential evidence, and client-ready reporting.</b>
@@ -15,7 +15,7 @@
 
 ## 📌 About the Application
 
-**Nessus Credential Assurance Dashboard** is a Python-based desktop GUI application that helps security engineers and VAPT teams quickly validate whether Nessus credentialed scans were successful or not.
+**Trinetra** is a Python-based desktop GUI application that helps security engineers and VAPT teams quickly validate whether Nessus credentialed scans were successful or not.
 
 The tool connects to Nessus using API keys, loads available scan folders and scans, exports the selected scan result as a temporary CSV, parses authentication-related plugins, and shows a clean dashboard before exporting final evidence reports.
 
@@ -304,4 +304,4 @@ Can we export client-ready evidence?
 
 **Sleeping Bhudda**
 
-Built for Nessus authentication validation, VAPT evidence reporting, and professional credential scan assurance.
+Built for Trinetra-powered Nessus authentication validation, VAPT evidence reporting, and professional credential scan assurance.

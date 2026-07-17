@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nessus Credential Assurance Dashboard
+Trinetra
 Author: Sleeping Bhudda
 
 Purpose
@@ -107,7 +107,7 @@ except Exception:
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
-APP_NAME = "Nessus Credential Assurance Dashboard"
+APP_NAME = "Trinetra"
 APP_VERSION = "2.0"
 AUTHOR = "Sleeping Bhudda"
 USER_AGENT = f"nessus-auth-dashboard/{APP_VERSION} ({AUTHOR})"
@@ -1276,7 +1276,7 @@ class LoginDialog:
         form = tk.Frame(left, bg="#F8FAFC")
         form.place(relx=0.5, rely=0.5, anchor="center", width=310)
 
-        tk.Label(form, text="N-CAD", bg="#F8FAFC", fg="#0F766E", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        tk.Label(form, text="TRINETRA", bg="#F8FAFC", fg="#0F766E", font=("Segoe UI", 20, "bold")).pack(anchor="w")
         tk.Label(
             form,
             text="Nessus Credential Assurance",
@@ -1358,7 +1358,7 @@ class LoginDialog:
             c.create_line(0, y, 560, y, fill="#1F2937")
         c.create_oval(350, 350, 760, 760, fill="#0F766E", outline="")
         c.create_oval(390, 390, 690, 690, fill="#1D4ED8", outline="")
-        c.create_text(68, 78, text="Credential Assurance", fill="#5EEAD4", font=("Segoe UI", 13, "bold"), anchor="w")
+        c.create_text(68, 78, text="Trinetra", fill="#5EEAD4", font=("Segoe UI", 13, "bold"), anchor="w")
         c.create_text(
             68,
             160,
