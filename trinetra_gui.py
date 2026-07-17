@@ -33,7 +33,7 @@ Kali / Ubuntu:
     python3 -m pip install requests openpyxl matplotlib
 
 Run:
-    python3 nessus_auth_rapid7_gui.py
+    python3 trinetra_gui.py
 
 Notes
 -----

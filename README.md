@@ -213,7 +213,7 @@ pip install requests openpyxl matplotlib
 ```bash
 git clone https://github.com/ArupSEK/Nessus_tool.git
 cd Nessus_tool
-python3 nessus_auth_rapid7_gui.py
+python3 trinetra_gui.py
 ```
 
 ### Windows
@@ -221,7 +221,7 @@ python3 nessus_auth_rapid7_gui.py
 ```powershell
 git clone https://github.com/ArupSEK/Nessus_tool.git
 cd Nessus_tool
-python nessus_auth_rapid7_gui.py
+python trinetra_gui.py
 ```
 
 ---
