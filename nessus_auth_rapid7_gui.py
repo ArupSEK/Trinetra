@@ -1472,6 +1472,7 @@ class NessusAuthDashboardGUI:
         self.selected_folder_id: str = ""
         self.selected_scan_id: Optional[str] = None
         self.selected_scan_name: str = ""
+        self.selected_scans: List[Tuple[str, str]] = []
         self.last_output_folder: Optional[Path] = None
 
         self.style = ttk.Style()
@@ -1644,9 +1645,9 @@ class NessusAuthDashboardGUI:
 
         scan_panel = ttk.Frame(row2)
         scan_panel.pack(side="left", fill="both", expand=True)
-        ttk.Label(scan_panel, text="2. Scan", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
+        ttk.Label(scan_panel, text="2. Scan (select one or more)", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
         columns = ("id", "name", "status", "folder", "last_modification_date")
-        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=6)
+        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=6, selectmode="extended")
         for col, label, width in [
             ("id", "Scan ID", 80),
             ("name", "Scan Name", 520),
@@ -1664,6 +1665,8 @@ class NessusAuthDashboardGUI:
 
         row3 = ttk.Frame(container)
         row3.pack(fill="x", padx=8, pady=4)
+        ttk.Button(row3, text="Select All Visible Scans", command=self.select_all_visible_scans).pack(side="left", padx=(0, 6))
+        ttk.Button(row3, text="Clear Scan Selection", command=self.clear_scan_selection).pack(side="left", padx=(0, 12))
         ttk.Label(row3, text="3. Scan History").pack(side="left")
         self.history_combo = ttk.Combobox(row3, textvariable=self.history_filter_var, width=58, state="readonly", values=[])
         self.history_combo.pack(side="left", padx=6)
@@ -1913,6 +1916,7 @@ class NessusAuthDashboardGUI:
             self.scan_tree.delete(item)
         self.selected_scan_id = None
         self.selected_scan_name = ""
+        self.selected_scans = []
         self.clear_history_selector()
         folder_id = self.selected_folder_id
         if folder_id == "__MISSING__":
@@ -1941,18 +1945,52 @@ class NessusAuthDashboardGUI:
     def on_scan_select(self, _event=None):
         sel = self.scan_tree.selection()
         if not sel:
+            self.selected_scan_id = None
+            self.selected_scan_name = ""
+            self.selected_scans = []
+            self.clear_history_selector()
             return
-        values = self.scan_tree.item(sel[0], "values")
-        if len(values) < 2 or not values[0]:
+
+        selected_scans: List[Tuple[str, str]] = []
+        for item in sel:
+            values = self.scan_tree.item(item, "values")
+            if len(values) >= 2 and values[0]:
+                selected_scans.append((str(values[0]), str(values[1])))
+
+        self.selected_scans = selected_scans
+        if not selected_scans:
             self.selected_scan_id = None
             self.selected_scan_name = ""
             self.status_var.set("No valid scan selected")
             return
-        self.selected_scan_id = str(values[0])
-        self.selected_scan_name = str(values[1])
+
+        if len(selected_scans) > 1:
+            self.selected_scan_id = None
+            self.selected_scan_name = ""
+            self.clear_history_selector()
+            self.history_filter_var.set("Latest/default history for each selected scan")
+            self.status_var.set(f"Selected {len(selected_scans)} scans. Build Dashboard will merge latest/default results.")
+            return
+
+        self.selected_scan_id, self.selected_scan_name = selected_scans[0]
         self.status_var.set(f"Selected scan {self.selected_scan_id}: {self.selected_scan_name}. Loading histories...")
         self.clear_history_selector()
         threading.Thread(target=self._load_histories_worker, args=(self.selected_scan_id, self.selected_scan_name), daemon=True).start()
+
+    def select_all_visible_scans(self):
+        items = self.scan_tree.get_children()
+        if not items:
+            return
+        self.scan_tree.selection_set(items)
+        self.on_scan_select()
+
+    def clear_scan_selection(self):
+        self.scan_tree.selection_remove(self.scan_tree.selection())
+        self.selected_scan_id = None
+        self.selected_scan_name = ""
+        self.selected_scans = []
+        self.clear_history_selector()
+        self.status_var.set("Scan selection cleared.")
 
     def clear_history_selector(self):
         self.scan_histories = []
@@ -2009,54 +2047,73 @@ class NessusAuthDashboardGUI:
         self.history_id_var.set(self.history_label_to_id.get(label, ""))
 
     def load_preview_thread(self):
-        if not self.selected_scan_id:
-            messagebox.showwarning("No Scan Selected", "Please select a scan first or use Offline CSV.")
+        if not self.selected_scans and self.selected_scan_id:
+            self.selected_scans = [(self.selected_scan_id, self.selected_scan_name or self.selected_scan_id)]
+        if not self.selected_scans:
+            messagebox.showwarning("No Scan Selected", "Please select one or more scans first or use Offline CSV.")
             return
         threading.Thread(target=self._load_preview_worker, daemon=True).start()
 
     def _load_preview_worker(self):
         try:
-            scan_id = self.selected_scan_id or ""
-            scan_name = self.selected_scan_name or scan_id
-            history_id = self.history_id_var.get().strip()
+            selected_scans = list(self.selected_scans)
+            single_scan = len(selected_scans) == 1
+            history_id = self.history_id_var.get().strip() if single_scan else ""
             classifier = AuthClassifier()
 
-            self.thread_log(f"Loading dashboard preview for scan {scan_id}...")
+            if single_scan:
+                self.thread_log(f"Loading dashboard preview for scan {selected_scans[0][0]}...")
+            else:
+                self.thread_log(f"Loading combined dashboard preview for {len(selected_scans)} scans...")
             self.set_progress(5)
             client = self.make_client()
 
             authoritative_hosts: List[str] = []
             configured_targets: List[str] = []
-            try:
-                self.thread_log("Fetching scan details for authoritative host inventory...")
-                details = client.get_scan_details(scan_id, history_id or None)
-                authoritative_hosts = classifier.hosts_from_scan_details(details)
-                configured_targets = classifier.targets_from_scan_details(details)
-                classifier.configured_targets = configured_targets
-                self.thread_log(f"Host inventory from scan details: {len(authoritative_hosts)} hosts.")
-                if configured_targets:
-                    self.thread_log(f"Configured scan targets found: {len(configured_targets)} targets.")
-            except Exception as exc:
-                self.thread_log(f"Could not fetch scan details; will fallback to CSV hosts. Reason: {exc}")
-            self.set_progress(25)
+            all_findings: List[AuthFinding] = []
+            raw_rows_count = 0
+            scan_names: List[str] = []
+            scan_ids: List[str] = []
 
             with tempfile.TemporaryDirectory(prefix="nessus_auth_preview_") as tmpdir:
-                csv_path = Path(tmpdir) / f"nessus_scan_{scan_id}_preview.csv"
-                client.export_scan_csv(scan_id, csv_path, history_id or None, progress_cb=self.thread_log)
-                self.set_progress(65)
-                raw_rows, findings, csv_hosts = classifier.parse_csv(csv_path)
-                if not authoritative_hosts:
-                    authoritative_hosts = csv_hosts
-                self.thread_log(f"Parsed {len(raw_rows)} raw rows and {len(findings)} auth-related findings.")
+                total_scans = max(len(selected_scans), 1)
+                for index, (scan_id, scan_name) in enumerate(selected_scans, start=1):
+                    scan_names.append(scan_name or scan_id)
+                    scan_ids.append(scan_id)
+                    current_history_id = history_id if single_scan else ""
+                    self.thread_log(f"[{index}/{total_scans}] Fetching scan details for {scan_id}: {scan_name or scan_id}")
+                    try:
+                        details = client.get_scan_details(scan_id, current_history_id or None)
+                        authoritative_hosts.extend(classifier.hosts_from_scan_details(details))
+                        configured_targets.extend(classifier.targets_from_scan_details(details))
+                        self.thread_log(f"[{index}/{total_scans}] Host inventory loaded.")
+                    except Exception as exc:
+                        self.thread_log(f"[{index}/{total_scans}] Could not fetch scan details; will fallback to CSV hosts. Reason: {exc}")
+
+                    self.set_progress(10 + int(index / total_scans * 20))
+                    csv_path = Path(tmpdir) / f"nessus_scan_{scan_id}_preview.csv"
+                    client.export_scan_csv(scan_id, csv_path, current_history_id or None, progress_cb=self.thread_log)
+                    raw_rows, findings, csv_hosts = classifier.parse_csv(csv_path)
+                    authoritative_hosts.extend(csv_hosts)
+                    all_findings.extend(findings)
+                    raw_rows_count += len(raw_rows)
+                    self.thread_log(f"[{index}/{total_scans}] Parsed {len(raw_rows)} raw rows and {len(findings)} auth-related findings.")
+                    self.set_progress(30 + int(index / total_scans * 45))
+
+                classifier.configured_targets = sort_hosts(configured_targets)
                 self.set_progress(80)
+                dashboard_scan_name = scan_names[0] if single_scan else f"Combined scans ({len(selected_scans)})"
+                dashboard_scan_id = scan_ids[0] if single_scan else ",".join(scan_ids)
+                dashboard_history_id = history_id if single_scan else "latest/default per scan"
+                source_file = "Temporary Nessus API CSV export" if single_scan else "Temporary Nessus API CSV exports"
                 data = classifier.classify(
-                    scan_name=scan_name,
-                    scan_id=scan_id,
-                    history_id=history_id,
-                    authoritative_hosts=authoritative_hosts,
-                    findings=findings,
-                    raw_rows_count=len(raw_rows),
-                    source_file="Temporary Nessus API CSV export",
+                    scan_name=dashboard_scan_name,
+                    scan_id=dashboard_scan_id,
+                    history_id=dashboard_history_id,
+                    authoritative_hosts=sort_hosts(authoritative_hosts),
+                    findings=all_findings,
+                    raw_rows_count=raw_rows_count,
+                    source_file=source_file,
                 )
 
             self.data = data
