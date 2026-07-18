@@ -113,6 +113,21 @@ AUTHOR = "Sleeping Bhudda"
 USER_AGENT = f"nessus-auth-dashboard/{APP_VERSION} ({AUTHOR})"
 AUTH_CONFIG_PATH = Path.home() / ".nessus_credential_assurance_auth.json"
 AUTH_ITERATIONS = 260_000
+APP_DIR = Path(__file__).resolve().parent
+LOGO_PATH = APP_DIR / "assets" / "trinetra_logo.png"
+MARK_PATH = APP_DIR / "assets" / "trinetra_mark.png"
+
+
+def load_logo_image(master: tk.Misc, subsample: int = 1, path: Path = LOGO_PATH) -> Optional[tk.PhotoImage]:
+    if not path.exists():
+        return None
+    try:
+        image = tk.PhotoImage(master=master, file=str(path))
+        if subsample > 1:
+            image = image.subsample(subsample, subsample)
+        return image
+    except Exception:
+        return None
 
 # -----------------------------
 # Classification constants
@@ -1271,6 +1286,10 @@ class LocalAuthManager:
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+    def reset(self) -> None:
+        if self.path.exists():
+            self.path.unlink()
+
     def hash_password(self, password: str, salt: bytes, iterations: int = AUTH_ITERATIONS) -> bytes:
         return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
 
@@ -1297,101 +1316,155 @@ class LoginDialog:
         self.username_var = tk.StringVar()
         self.password_var = tk.StringVar()
         self.confirm_var = tk.StringVar()
+        self.show_password_var = tk.BooleanVar(value=False)
         self.logo_phase = 0
         self.logo_after_id: Optional[str] = None
+        self.motion_items: Dict[str, Any] = {}
+        self.window_icon_image: Optional[tk.PhotoImage] = None
+        self.login_logo_image: Optional[tk.PhotoImage] = None
 
         self.window = tk.Toplevel(root)
         self.window.title(f"{APP_NAME} Login")
         self.window.resizable(False, False)
         self.window.configure(bg="#F8FAFC")
-        self.window.transient(root)
+        self.window_icon_image = load_logo_image(self.window, 5, MARK_PATH)
+        if self.window_icon_image is not None:
+            self.window.iconphoto(False, self.window_icon_image)
+        if root.state() != "withdrawn":
+            self.window.transient(root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self.cancel)
 
         self.build()
         self.center()
-        self.username_entry.focus_set()
+        self.show()
 
     def build(self):
         self.window.geometry("980x560")
-        shell = tk.Frame(self.window, bg="#F8FAFC")
+        for child in self.window.winfo_children():
+            child.destroy()
+
+        shell = tk.Frame(self.window, bg="#07111F")
         shell.pack(fill="both", expand=True)
 
-        left = tk.Frame(shell, bg="#F8FAFC", width=420)
+        left = tk.Frame(shell, bg="#0B1726", width=380)
         left.pack(side="left", fill="both")
         left.pack_propagate(False)
 
-        form = tk.Frame(left, bg="#F8FAFC")
-        form.place(relx=0.5, rely=0.5, anchor="center", width=310)
+        form = tk.Frame(left, bg="#0B1726")
+        form.place(relx=0.5, rely=0.48, anchor="center", width=290)
 
-        tk.Label(form, text="TRINETRA", bg="#F8FAFC", fg="#0F766E", font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        brand = tk.Frame(form, bg="#0B1726")
+        brand.pack(anchor="w", fill="x")
+        self.login_logo_image = load_logo_image(self.window, 5, MARK_PATH)
+        if self.login_logo_image is not None:
+            tk.Label(brand, image=self.login_logo_image, bg="#0B1726").pack(side="left", padx=(0, 12))
+        brand_text = tk.Frame(brand, bg="#0B1726")
+        brand_text.pack(side="left", anchor="center", fill="x", expand=True)
+        tk.Label(brand_text, text="TRINETRA", bg="#0B1726", fg="#5EEAD4", font=("Segoe UI", 11, "bold")).pack(anchor="w")
         tk.Label(
-            form,
-            text="Trinetra Credential Assurance",
-            bg="#F8FAFC",
-            fg="#334155",
-            font=("Segoe UI", 10, "bold"),
-        ).pack(anchor="w", pady=(2, 26))
+            brand_text,
+            text="Nessus authentication dashboard",
+            bg="#0B1726",
+            fg="#94A3B8",
+            font=("Segoe UI", 8),
+            wraplength=220,
+            justify="left",
+        ).pack(anchor="w")
+        tk.Frame(form, bg="#0B1726", height=24).pack(fill="x")
 
-        title = "Create secure access" if self.setup_mode else "Welcome back"
-        subtitle = "Set up your local admin login" if self.setup_mode else "Sign in to continue remediation work"
-        tk.Label(form, text=title, bg="#F8FAFC", fg="#0F172A", font=("Segoe UI", 19, "bold")).pack(anchor="w")
-        tk.Label(form, text=subtitle, bg="#F8FAFC", fg="#64748B", font=("Segoe UI", 10)).pack(anchor="w", pady=(4, 22))
+        title = "Create login" if self.setup_mode else "Login"
+        subtitle = "Set up local dashboard access." if self.setup_mode else "Sign in to open the dashboard."
+        tk.Label(form, text=title, bg="#0B1726", fg="#F8FAFC", font=("Segoe UI", 17, "bold")).pack(anchor="w")
+        tk.Label(form, text=subtitle, bg="#0B1726", fg="#94A3B8", font=("Segoe UI", 8), wraplength=280, justify="left").pack(anchor="w", pady=(5, 22))
 
-        tk.Label(form, text="Username", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        self.username_entry = tk.Entry(form, textvariable=self.username_var, width=34, bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11))
-        self.username_entry.pack(fill="x", ipady=8, pady=(4, 14))
+        tk.Label(form, text="Username", bg="#0B1726", fg="#CBD5E1", font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self.username_entry = tk.Entry(form, textvariable=self.username_var, width=34, bg="#0F1E30", fg="#F8FAFC", insertbackground="#F8FAFC", relief="solid", bd=1, highlightthickness=1, highlightbackground="#1E3A5F", highlightcolor="#5EEAD4", font=("Segoe UI", 9))
+        self.username_entry.pack(fill="x", ipady=6, pady=(5, 14))
 
-        tk.Label(form, text="Password", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-        tk.Entry(form, textvariable=self.password_var, width=34, show="*", bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11)).pack(fill="x", ipady=8, pady=(4, 14))
+        tk.Label(form, text="Password", bg="#0B1726", fg="#CBD5E1", font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        self.password_entry = tk.Entry(form, textvariable=self.password_var, width=34, show="*", bg="#0F1E30", fg="#F8FAFC", insertbackground="#F8FAFC", relief="solid", bd=1, highlightthickness=1, highlightbackground="#1E3A5F", highlightcolor="#5EEAD4", font=("Segoe UI", 9))
+        self.password_entry.pack(fill="x", ipady=6, pady=(5, 8))
+
+        options_row = tk.Frame(form, bg="#0B1726")
+        options_row.pack(fill="x", pady=(0, 14))
+        tk.Checkbutton(
+            options_row,
+            text="Show password",
+            variable=self.show_password_var,
+            command=self.toggle_password_visibility,
+            bg="#0B1726",
+            fg="#94A3B8",
+            activebackground="#0B1726",
+            activeforeground="#5EEAD4",
+            selectcolor="#0F1E30",
+            font=("Segoe UI", 8),
+        ).pack(side="left")
+        if not self.setup_mode:
+            tk.Button(
+                options_row,
+                text="Forgot password?",
+                command=self.reset_login,
+                bg="#0B1726",
+                fg="#5EEAD4",
+                activebackground="#0B1726",
+                activeforeground="#99F6E4",
+                relief="flat",
+                bd=0,
+                font=("Segoe UI", 8),
+                cursor="hand2",
+            ).pack(side="right")
 
         if self.setup_mode:
-            tk.Label(form, text="Confirm password", bg="#F8FAFC", fg="#334155", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-            tk.Entry(form, textvariable=self.confirm_var, width=34, show="*", bg="#FFFFFF", fg="#0F172A", relief="solid", bd=1, font=("Segoe UI", 11)).pack(fill="x", ipady=8, pady=(4, 14))
+            tk.Label(form, text="Confirm password", bg="#0B1726", fg="#CBD5E1", font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            self.confirm_entry = tk.Entry(form, textvariable=self.confirm_var, width=34, show="*", bg="#0F1E30", fg="#F8FAFC", insertbackground="#F8FAFC", relief="solid", bd=1, highlightthickness=1, highlightbackground="#1E3A5F", highlightcolor="#5EEAD4", font=("Segoe UI", 9))
+            self.confirm_entry.pack(fill="x", ipady=6, pady=(5, 14))
+        else:
+            self.confirm_entry = None
 
         button_text = "Create Login" if self.setup_mode else "Sign In"
         tk.Button(
             form,
             text=button_text,
             command=self.submit,
-            bg="#0F766E",
+            bg="#16A34A",
             fg="#FFFFFF",
-            activebackground="#115E59",
+            activebackground="#15803D",
             activeforeground="#FFFFFF",
             relief="flat",
             bd=0,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 9, "bold"),
             cursor="hand2",
-        ).pack(fill="x", ipady=9, pady=(4, 10))
+        ).pack(fill="x", ipady=7, pady=(2, 9))
 
         tk.Button(
             form,
             text="Exit",
             command=self.cancel,
-            bg="#E2E8F0",
-            fg="#0F172A",
-            activebackground="#CBD5E1",
-            activeforeground="#0F172A",
+            bg="#13243A",
+            fg="#CBD5E1",
+            activebackground="#1E3A5F",
+            activeforeground="#F8FAFC",
             relief="flat",
             bd=0,
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             cursor="hand2",
-        ).pack(fill="x", ipady=8)
+        ).pack(fill="x", ipady=6)
 
         self.message_var = tk.StringVar()
-        tk.Label(form, textvariable=self.message_var, bg="#F8FAFC", fg="#DC2626", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 0))
+        tk.Label(form, textvariable=self.message_var, bg="#0B1726", fg="#FCA5A5", font=("Segoe UI", 8), wraplength=220, justify="left").pack(anchor="w", pady=(10, 0))
 
         tk.Label(
             form,
-            text="Local authentication protects dashboard access on this workstation.",
-            bg="#F8FAFC",
+            text=f"{AUTHOR}. All rights reserved.",
+            bg="#0B1726",
             fg="#64748B",
-            wraplength=300,
+            wraplength=280,
             justify="left",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(24, 0))
+            font=("Segoe UI", 7),
+        ).pack(anchor="w", pady=(42, 0))
 
-        right = tk.Canvas(shell, width=560, height=560, bg="#111827", highlightthickness=0)
+        right = tk.Canvas(shell, width=650, height=560, bg="#06111F", highlightthickness=0)
         right.pack(side="right", fill="both", expand=True)
         self.hero_canvas = right
         self.draw_login_art()
@@ -1400,62 +1473,114 @@ class LoginDialog:
 
     def draw_login_art(self):
         c = self.hero_canvas
-        for x in range(0, 580, 28):
-            c.create_line(x, 0, x, 560, fill="#1F2937")
-        for y in range(0, 580, 28):
-            c.create_line(0, y, 560, y, fill="#1F2937")
-        c.create_oval(350, 350, 760, 760, fill="#0F766E", outline="")
-        c.create_oval(390, 390, 690, 690, fill="#1D4ED8", outline="")
-        c.create_text(68, 78, text="Trinetra", fill="#5EEAD4", font=("Segoe UI", 13, "bold"), anchor="w")
-        c.create_text(
-            68,
-            160,
-            text="CONTROL\nWHAT SCANNERS\nCAN VERIFY",
-            fill="#F8FAFC",
-            font=("Segoe UI", 34, "bold"),
-            anchor="w",
-            justify="left",
-        )
-        c.create_text(
-            70,
-            330,
-            text="Turn authentication evidence into focused remediation.\nPrioritize failed, partial, missing-credential, and\nunreachable targets before they become audit gaps.",
-            fill="#CBD5E1",
-            font=("Segoe UI", 15, "bold"),
-            anchor="w",
-            justify="left",
-            width=430,
-        )
-        c.create_text(70, 470, text="\"Visibility becomes value when it drives ownership.\"", fill="#A7F3D0", font=("Segoe UI", 13, "italic"), anchor="w")
-        c.create_text(70, 505, text=f"Built by {AUTHOR}", fill="#94A3B8", font=("Segoe UI", 10, "bold"), anchor="w")
+        self.motion_items = {"globe_dots": [], "scan_dots": []}
 
-        self.logo_ring = c.create_oval(398, 70, 492, 164, outline="#5EEAD4", width=3)
-        self.logo_ring_inner = c.create_oval(416, 88, 474, 146, outline="#38BDF8", width=2)
-        self.logo_dot = c.create_oval(440, 64, 454, 78, fill="#F8FAFC", outline="")
-        self.logo_core = c.create_text(445, 118, text="CA", fill="#F8FAFC", font=("Segoe UI", 17, "bold"))
+        for y in range(0, 560, 8):
+            shade = 14 + min(26, y // 24)
+            color = f"#{3:02x}{max(12, shade):02x}{max(28, shade + 20):02x}"
+            c.create_rectangle(0, y, 660, y + 8, fill=color, outline="")
+
+        c.create_polygon(0, 0, 650, 0, 650, 560, 540, 560, 430, 360, 235, 190, fill="#071A2B", outline="")
+        c.create_oval(355, 250, 840, 735, fill="#071827", outline="")
+        c.create_oval(430, 322, 742, 634, fill="#0C2340", outline="")
+
+        globe_cx, globe_cy = 465, 220
+        globe_rx, globe_ry = 190, 190
+        c.create_arc(globe_cx - globe_rx, globe_cy - globe_ry, globe_cx + globe_rx, globe_cy + globe_ry, start=85, extent=210, outline="#67E8F9", width=2, style="arc")
+        c.create_arc(globe_cx - 138, globe_cy - 190, globe_cx + 138, globe_cy + 190, start=94, extent=185, outline="#1E809E", width=1, style="arc")
+        c.create_arc(globe_cx - 88, globe_cy - 190, globe_cx + 88, globe_cy + 190, start=105, extent=160, outline="#1E809E", width=1, style="arc")
+        c.create_arc(globe_cx - 188, globe_cy - 82, globe_cx + 188, globe_cy + 82, start=105, extent=148, outline="#1E809E", width=1, style="arc")
+        c.create_arc(globe_cx - 180, globe_cy - 18, globe_cx + 180, globe_cy + 18, start=105, extent=148, outline="#1E809E", width=1, style="arc")
+
+        for i in range(145):
+            angle = i * 2.399963
+            radius = 15 + (i * 37 % 175)
+            squeeze = 0.52 + ((i * 11) % 45) / 100
+            x = globe_cx + math.cos(angle) * radius
+            y = globe_cy + math.sin(angle) * radius * squeeze
+            if x < globe_cx - globe_rx + 12:
+                continue
+            size = 1 + (i % 3)
+            color = "#BAE6FD" if i % 5 else "#67E8F9"
+            dot = c.create_oval(x - size, y - size, x + size, y + size, fill=color, outline="")
+            self.motion_items["globe_dots"].append((dot, x, y, size, i % 17))
+
+        c.create_text(72, 80, text="Authentication visibility", fill="#5EEAD4", font=("Segoe UI", 10, "bold"), anchor="w")
+        c.create_text(72, 138, text="Credential\nTrust Center", fill="#F8FAFC", font=("Segoe UI", 30, "bold"), anchor="w", justify="left")
+        c.create_text(
+            74,
+            248,
+            text="Validate Nessus login coverage and turn scan evidence into clean reporting.",
+            fill="#CBD5E1",
+            font=("Segoe UI", 12),
+            anchor="w",
+            justify="left",
+            width=285,
+        )
+
+        c.create_rectangle(75, 346, 200, 405, fill="#0B1726", outline="#1E3A5F", width=1)
+        c.create_text(96, 369, text="PASS", fill="#86EFAC", font=("Segoe UI", 9, "bold"), anchor="w")
+        c.create_text(96, 389, text="Verified", fill="#E2E8F0", font=("Segoe UI", 10, "bold"), anchor="w")
+        c.create_rectangle(218, 346, 343, 405, fill="#0B1726", outline="#1E3A5F", width=1)
+        c.create_text(239, 369, text="FAIL", fill="#FCA5A5", font=("Segoe UI", 9, "bold"), anchor="w")
+        c.create_text(239, 389, text="Needs action", fill="#E2E8F0", font=("Segoe UI", 10, "bold"), anchor="w")
+
+        c.create_text(74, 500, text=f"Built by {AUTHOR}", fill="#64748B", font=("Segoe UI", 8, "bold"), anchor="w")
+
+        scan_line = c.create_line(globe_cx - 150, globe_cy + 78, globe_cx + 112, globe_cy - 98, fill="#5EEAD4", width=1)
+        self.motion_items["scan_line"] = scan_line
+
+        for i, (x, y) in enumerate(((498, 178), (548, 235), (428, 300), (586, 142))):
+            dot = c.create_oval(x - 5, y - 5, x + 5, y + 5, fill="#5EEAD4", outline="")
+            self.motion_items["scan_dots"].append((dot, x, y, i))
+
         self.animate_logo()
 
     def animate_logo(self):
         if not hasattr(self, "hero_canvas"):
             return
         self.logo_phase += 1
-        angle = self.logo_phase / 12
-        radius = 50
-        cx, cy = 445, 117
-        x = cx + math.cos(angle) * radius
-        y = cy + math.sin(angle) * radius
-        self.hero_canvas.coords(self.logo_dot, x - 7, y - 7, x + 7, y + 7)
-        pulse = 4 + math.sin(angle * 1.5) * 4
-        self.hero_canvas.coords(self.logo_ring_inner, 416 - pulse, 88 - pulse, 474 + pulse, 146 + pulse)
-        self.logo_after_id = self.window.after(50, self.animate_logo)
+        angle = self.logo_phase / 18
+
+        for dot, x, y, size, offset in self.motion_items.get("globe_dots", []):
+            pulse = 0.35 + (math.sin(angle + offset) + 1) * 0.55
+            radius = size * pulse
+            self.hero_canvas.coords(dot, x - radius, y - radius, x + radius, y + radius)
+
+        x1 = 315 + math.sin(angle * 0.7) * 34
+        y1 = 302 + math.cos(angle * 0.7) * 18
+        x2 = 590 + math.cos(angle * 0.7) * 26
+        y2 = 118 + math.sin(angle * 0.7) * 24
+        self.hero_canvas.coords(self.motion_items["scan_line"], x1, y1, x2, y2)
+
+        for dot, x, y, offset in self.motion_items.get("scan_dots", []):
+            pulse = 4 + (math.sin(angle * 1.3 + offset) + 1) * 3
+            self.hero_canvas.coords(dot, x - pulse, y - pulse, x + pulse, y + pulse)
+
+        self.logo_after_id = self.window.after(70, self.animate_logo)
 
     def center(self):
         self.window.update_idletasks()
         width = self.window.winfo_width()
         height = self.window.winfo_height()
-        x = self.root.winfo_screenwidth() // 2 - width // 2
-        y = self.root.winfo_screenheight() // 2 - height // 2
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        x = max(0, screen_width // 2 - width // 2)
+        y = max(0, screen_height // 2 - height // 2)
         self.window.geometry(f"+{x}+{y}")
+
+    def show(self):
+        self.window.deiconify()
+        self.window.lift()
+        self.window.attributes("-topmost", True)
+        self.window.after_idle(lambda: self.window.attributes("-topmost", False))
+        self.username_entry.focus_force()
+
+    def toggle_password_visibility(self):
+        mask = "" if self.show_password_var.get() else "*"
+        self.password_entry.configure(show=mask)
+        if self.confirm_entry is not None:
+            self.confirm_entry.configure(show=mask)
 
     def submit(self):
         username = self.username_var.get().strip()
@@ -1479,6 +1604,34 @@ class LoginDialog:
         except Exception as exc:
             self.message_var.set(str(exc))
 
+    def reset_login(self):
+        confirmed = messagebox.askyesno(
+            "Reset Trinetra Login",
+            "Reset the local Trinetra login on this workstation?\n\n"
+            "You will create a new username and password. Nessus settings and scan data are not changed.",
+            parent=self.window,
+        )
+        if not confirmed:
+            return
+        try:
+            self.auth.reset()
+            self.setup_mode = True
+            self.username_var.set("")
+            self.password_var.set("")
+            self.confirm_var.set("")
+            if self.logo_after_id:
+                try:
+                    self.window.after_cancel(self.logo_after_id)
+                except Exception:
+                    pass
+                self.logo_after_id = None
+            self.build()
+            self.center()
+            self.show()
+            self.message_var.set("Create a new Trinetra login.")
+        except Exception as exc:
+            self.message_var.set(f"Reset failed: {exc}")
+
     def cancel(self):
         if self.logo_after_id:
             try:
@@ -1499,6 +1652,10 @@ class NessusAuthDashboardGUI:
         self.root.title(f"{APP_NAME} v{APP_VERSION}")
         self.root.geometry("1360x850")
         self.root.minsize(1150, 700)
+        self.window_icon_image = load_logo_image(self.root, 5, MARK_PATH)
+        if self.window_icon_image is not None:
+            self.root.iconphoto(False, self.window_icon_image)
+        self.top_logo_image: Optional[tk.PhotoImage] = None
 
         self.data: Optional[DashboardData] = None
         self.scans: List[Dict[str, Any]] = []
@@ -1540,19 +1697,23 @@ class NessusAuthDashboardGUI:
     def apply_theme(self):
         dark = self.dark_mode.get()
         if dark:
-            bg = "#101828"
+            bg = "#0B1220"
             fg = "#F8FAFC"
-            panel = "#182235"
-            entry = "#243246"
+            panel = "#111C2E"
+            entry = "#17243A"
             header = "#0B1220"
             accent = "#06B6D4"
-            muted = "#A5B4FC"
-            border = "#334155"
+            muted = "#94A3B8"
+            border = "#26364F"
             text_bg = "#0F172A"
             text_fg = "#E2E8F0"
             tab_selected = "#0E7490"
-            button_bg = "#2563EB"
-            button_active = "#1D4ED8"
+            button_bg = "#1E293B"
+            button_active = "#334155"
+            primary_bg = "#0E7490"
+            primary_active = "#155E75"
+            export_bg = "#0F766E"
+            export_active = "#115E59"
             card_palette = {
                 "Total": "#0E7490",
                 "Pass": STATUS_COLORS[AuthStatus.PASS],
@@ -1578,6 +1739,10 @@ class NessusAuthDashboardGUI:
             tab_selected = "#38BDF8"
             button_bg = "#2563EB"
             button_active = "#1D4ED8"
+            primary_bg = "#0891B2"
+            primary_active = "#0E7490"
+            export_bg = "#0F766E"
+            export_active = "#115E59"
             card_palette = {
                 "Total": "#06B6D4",
                 "Pass": "#16A34A",
@@ -1599,29 +1764,34 @@ class NessusAuthDashboardGUI:
         self.style.configure("Subtitle.TLabel", background=bg, foreground=muted, font=("Segoe UI", 10))
         self.style.configure("Version.TLabel", background=panel, foreground=fg, font=("Segoe UI", 9, "bold"), padding=[8, 3])
         self.style.configure("Header.TLabel", background=bg, foreground=accent, font=("Segoe UI", 15, "bold"))
-        self.style.configure("Card.TFrame", background=panel, relief="ridge", borderwidth=1)
+        self.style.configure("SectionTitle.TLabel", background=panel, foreground=accent, font=("Segoe UI", 10, "bold"))
+        self.style.configure("Card.TFrame", background=panel, relief="flat", borderwidth=0)
         self.style.configure("CardTitle.TLabel", background=panel, foreground=muted, font=("Segoe UI", 10, "bold"))
         self.style.configure("CardValue.TLabel", background=panel, foreground=fg, font=("Segoe UI", 24, "bold"))
-        self.style.configure("TButton", padding=6, background=button_bg, foreground="#FFFFFF", bordercolor=button_bg)
+        self.style.configure("TButton", padding=[10, 6], background=button_bg, foreground="#E2E8F0", bordercolor=button_bg, focusthickness=1, focuscolor=accent)
         self.style.map("TButton", background=[("active", button_active), ("pressed", button_active)], foreground=[("disabled", "#94A3B8")])
+        self.style.configure("Primary.TButton", padding=[12, 7], background=primary_bg, foreground="#FFFFFF", bordercolor=primary_bg)
+        self.style.map("Primary.TButton", background=[("active", primary_active), ("pressed", primary_active)])
+        self.style.configure("Export.TButton", padding=[10, 6], background=export_bg, foreground="#FFFFFF", bordercolor=export_bg)
+        self.style.map("Export.TButton", background=[("active", export_active), ("pressed", export_active)])
         self.style.configure("TCheckbutton", background=bg, foreground=fg)
-        self.style.configure("TEntry", fieldbackground=entry, foreground=fg, bordercolor=border)
+        self.style.configure("TEntry", fieldbackground=entry, foreground=fg, bordercolor=border, padding=[6, 4])
         self.style.configure("TCombobox", fieldbackground=entry, foreground=fg, background=entry, arrowcolor=accent)
         self.style.configure("TLabelFrame", background=bg, foreground=accent, bordercolor=border)
-        self.style.configure("TLabelFrame.Label", background=bg, foreground=accent, font=("Segoe UI", 9, "bold"))
-        self.style.configure("Treeview", background=entry, foreground=fg, fieldbackground=entry, rowheight=26)
-        self.style.configure("Treeview.Heading", background=header, foreground=fg, font=("Segoe UI", 9, "bold"), bordercolor=accent)
+        self.style.configure("TLabelFrame.Label", background=bg, foreground=accent, font=("Segoe UI", 10, "bold"))
+        self.style.configure("Treeview", background=entry, foreground=fg, fieldbackground=entry, rowheight=28, bordercolor=border, borderwidth=0)
+        self.style.configure("Treeview.Heading", background=header, foreground=fg, font=("Segoe UI", 9, "bold"), bordercolor=border, relief="flat")
         self.style.configure("TNotebook", background=bg)
-        self.style.configure("TNotebook.Tab", padding=[10, 5], background=panel, foreground=fg)
+        self.style.configure("TNotebook.Tab", padding=[12, 7], background=panel, foreground=fg)
         self.style.map("TNotebook.Tab", background=[("selected", tab_selected)], foreground=[("selected", "#FFFFFF")])
         self.style.configure("Horizontal.TProgressbar", troughcolor=panel, background=accent, bordercolor=border, lightcolor=accent, darkcolor=accent)
 
         card_names = ["Total", "Pass", "Fail", "Partial", "NoCreds", "NotReachable", "Unknown", "Coverage", "Success"]
         for name in card_names:
             color = card_palette[name]
-            self.style.configure(f"{name}Card.TFrame", background=color, relief="flat")
-            self.style.configure(f"{name}CardTitle.TLabel", background=color, foreground="#FFFFFF", font=("Segoe UI", 10, "bold"))
-            self.style.configure(f"{name}CardValue.TLabel", background=color, foreground="#FFFFFF", font=("Segoe UI", 24, "bold"))
+            self.style.configure(f"{name}Card.TFrame", background=panel, relief="flat")
+            self.style.configure(f"{name}CardTitle.TLabel", background=panel, foreground=color, font=("Segoe UI", 10, "bold"))
+            self.style.configure(f"{name}CardValue.TLabel", background=panel, foreground=fg, font=("Segoe UI", 25, "bold"))
 
         for widget_name in ("summary_text", "drill_text", "log_text"):
             widget = getattr(self, widget_name, None)
@@ -1647,6 +1817,10 @@ class NessusAuthDashboardGUI:
         frame = ttk.Frame(self.root)
         frame.pack(fill="x", padx=12, pady=(10, 6))
 
+        self.top_logo_image = load_logo_image(self.root, 6, MARK_PATH)
+        if self.top_logo_image is not None:
+            ttk.Label(frame, image=self.top_logo_image).pack(side="left", padx=(0, 10))
+
         title_group = ttk.Frame(frame)
         title_group.pack(side="left", fill="x", expand=True)
         ttk.Label(title_group, text=APP_NAME, style="AppTitle.TLabel").pack(anchor="w")
@@ -1660,31 +1834,35 @@ class NessusAuthDashboardGUI:
         ttk.Checkbutton(frame, text="Dark Mode", variable=self.dark_mode, command=self.apply_theme).pack(side="right")
 
     def build_scan_section(self):
-        container = ttk.LabelFrame(self.root, text="Connection and Scan Selection")
-        container.pack(fill="x", padx=10, pady=4)
+        outer = ttk.Frame(self.root, style="Panel.TFrame")
+        outer.pack(fill="x", padx=12, pady=(4, 8))
+        ttk.Label(outer, text="Scan Setup", style="SectionTitle.TLabel").pack(anchor="w", padx=12, pady=(8, 4))
+
+        container = ttk.Frame(outer, style="Panel.TFrame")
+        container.pack(fill="x", padx=10, pady=(0, 10))
 
         connection_row = ttk.Frame(container)
-        connection_row.pack(fill="x", padx=8, pady=(4, 2))
+        connection_row.pack(fill="x", padx=10, pady=(8, 4))
         ttk.Label(connection_row, text="Base URL").pack(side="left")
-        ttk.Entry(connection_row, textvariable=self.base_url_var, width=34).pack(side="left", padx=5)
-        ttk.Checkbutton(connection_row, text="Verify TLS", variable=self.verify_tls).pack(side="left", padx=6)
-        ttk.Button(connection_row, text="Test / Load Folders", command=self.load_scans_thread).pack(side="left", padx=4)
-        ttk.Button(connection_row, text="Offline: Load CSV", command=self.load_offline_csv).pack(side="left", padx=4)
+        ttk.Entry(connection_row, textvariable=self.base_url_var, width=34).pack(side="left", padx=(6, 12))
+        ttk.Checkbutton(connection_row, text="Verify TLS", variable=self.verify_tls).pack(side="left", padx=(0, 10))
+        ttk.Button(connection_row, text="Load Folders", command=self.load_scans_thread, style="Primary.TButton").pack(side="left", padx=(0, 6))
+        ttk.Button(connection_row, text="Load CSV", command=self.load_offline_csv).pack(side="left", padx=(0, 6))
 
         credential_row = ttk.Frame(container)
-        credential_row.pack(fill="x", padx=8, pady=(2, 4))
+        credential_row.pack(fill="x", padx=10, pady=(2, 8))
         ttk.Label(credential_row, text="Access Key").pack(side="left")
-        ttk.Entry(credential_row, textvariable=self.access_key_var, width=48, show="*").pack(side="left", padx=5)
+        ttk.Entry(credential_row, textvariable=self.access_key_var, width=48, show="*").pack(side="left", padx=(6, 12))
         ttk.Label(credential_row, text="Secret Key").pack(side="left")
-        ttk.Entry(credential_row, textvariable=self.secret_key_var, width=48, show="*").pack(side="left", padx=5)
+        ttk.Entry(credential_row, textvariable=self.secret_key_var, width=48, show="*").pack(side="left", padx=(6, 0))
 
         row2 = ttk.Frame(container)
-        row2.pack(fill="both", expand=True, padx=8, pady=4)
+        row2.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
         folder_panel = ttk.Frame(row2)
         folder_panel.pack(side="left", fill="y", padx=(0, 8))
-        ttk.Label(folder_panel, text="1. Folder", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
-        self.folder_tree = ttk.Treeview(folder_panel, columns=("name", "count", "folder_id"), displaycolumns=("name", "count"), show="headings", height=6)
+        ttk.Label(folder_panel, text="1. Folder", style="Panel.TLabel").pack(anchor="w", pady=(0, 4))
+        self.folder_tree = ttk.Treeview(folder_panel, columns=("name", "count", "folder_id"), displaycolumns=("name", "count"), show="headings", height=4)
         self.folder_tree.heading("name", text="Folder")
         self.folder_tree.heading("count", text="Scans")
         self.folder_tree.column("name", width=240, anchor="w")
@@ -1697,9 +1875,9 @@ class NessusAuthDashboardGUI:
 
         scan_panel = ttk.Frame(row2)
         scan_panel.pack(side="left", fill="both", expand=True)
-        ttk.Label(scan_panel, text="2. Scan (select one or more)", style="Panel.TLabel").pack(anchor="w", pady=(0, 3))
+        ttk.Label(scan_panel, text="2. Scans", style="Panel.TLabel").pack(anchor="w", pady=(0, 4))
         columns = ("id", "name", "status", "folder", "last_modification_date")
-        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=6, selectmode="extended")
+        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=4, selectmode="extended")
         for col, label, width in [
             ("id", "Scan ID", 80),
             ("name", "Scan Name", 520),
@@ -1716,7 +1894,7 @@ class NessusAuthDashboardGUI:
         scroll.pack(side="right", fill="y")
 
         row3 = ttk.Frame(container)
-        row3.pack(fill="x", padx=8, pady=4)
+        row3.pack(fill="x", padx=10, pady=(0, 8))
         ttk.Button(row3, text="Select All Visible Scans", command=self.select_all_visible_scans).pack(side="left", padx=(0, 6))
         ttk.Button(row3, text="Clear Scan Selection", command=self.clear_scan_selection).pack(side="left", padx=(0, 12))
         ttk.Label(row3, textvariable=self.selected_scan_count_var, style="Panel.TLabel").pack(side="left", padx=(0, 14))
@@ -1724,12 +1902,12 @@ class NessusAuthDashboardGUI:
         self.history_combo = ttk.Combobox(row3, textvariable=self.history_filter_var, width=58, state="readonly", values=[])
         self.history_combo.pack(side="left", padx=6)
         self.history_combo.bind("<<ComboboxSelected>>", self.on_history_select)
-        ttk.Button(row3, text="Build Dashboard", command=self.load_preview_thread).pack(side="left", padx=6)
+        ttk.Button(row3, text="Build Dashboard", command=self.load_preview_thread, style="Primary.TButton").pack(side="left", padx=6)
         ttk.Button(row3, text="Clear", command=self.clear_dashboard).pack(side="left", padx=4)
 
     def build_action_bar(self):
         frame = ttk.Frame(self.root)
-        frame.pack(fill="x", padx=10, pady=4)
+        frame.pack(fill="x", padx=12, pady=(2, 6))
         filter_group = ttk.Frame(frame)
         filter_group.pack(side="left", fill="x", expand=True)
         ttk.Label(filter_group, text="Search").pack(side="left")
@@ -1744,15 +1922,15 @@ class NessusAuthDashboardGUI:
 
         export_group = ttk.Frame(frame)
         export_group.pack(side="right")
-        ttk.Button(export_group, text="Export Excel", command=self.export_excel).pack(side="left", padx=3)
-        ttk.Button(export_group, text="Export PDF", command=self.export_pdf).pack(side="left", padx=3)
-        ttk.Button(export_group, text="Export CSV Bundle", command=self.export_csv_bundle).pack(side="left", padx=3)
+        ttk.Button(export_group, text="Export Excel", command=self.export_excel, style="Export.TButton").pack(side="left", padx=3)
+        ttk.Button(export_group, text="Export PDF", command=self.export_pdf, style="Export.TButton").pack(side="left", padx=3)
+        ttk.Button(export_group, text="Export CSV Bundle", command=self.export_csv_bundle, style="Export.TButton").pack(side="left", padx=3)
         ttk.Button(export_group, text="Copy Failed IPs", command=lambda: self.copy_ips(AuthStatus.FAIL)).pack(side="left", padx=3)
         ttk.Button(export_group, text="Open Output Folder", command=self.open_output_folder).pack(side="left", padx=3)
 
     def build_dashboard_tabs(self):
         self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=4)
+        self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 6))
 
         self.dashboard_tab = ttk.Frame(self.notebook)
         self.hosts_tab = ttk.Frame(self.notebook)
@@ -1777,7 +1955,7 @@ class NessusAuthDashboardGUI:
 
     def build_dashboard_tab(self):
         top = ttk.Frame(self.dashboard_tab)
-        top.pack(fill="x", padx=8, pady=8)
+        top.pack(fill="x", padx=10, pady=(10, 6))
         for col in range(5):
             top.columnconfigure(col, weight=1, uniform="metric_cards")
         self.card_labels: Dict[str, tk.Label] = {}
@@ -1798,25 +1976,24 @@ class NessusAuthDashboardGUI:
                 ("Card.TFrame", "CardTitle.TLabel", "CardValue.TLabel"),
             )
             card = ttk.Frame(top, style=frame_style)
-            card.grid(row=idx // 5, column=idx % 5, sticky="ew", padx=4, pady=4)
-            ttk.Label(card, text=title, style=title_style).pack(anchor="w", padx=10, pady=(8, 0))
+            card.grid(row=idx // 5, column=idx % 5, sticky="ew", padx=5, pady=5)
+            ttk.Label(card, text=title, style=title_style).pack(anchor="w", padx=12, pady=(8, 0))
             lbl = ttk.Label(card, text="0", style=value_style)
-            lbl.pack(anchor="w", padx=10, pady=(0, 8))
+            lbl.pack(anchor="w", padx=12, pady=(0, 8))
             self.card_labels[metric_key] = lbl
 
-        middle = ttk.Frame(self.dashboard_tab)
-        middle.pack(fill="both", expand=True, padx=8, pady=8)
-        self.chart_frame_left = ttk.LabelFrame(middle, text="Authentication Status Breakdown")
-        self.chart_frame_left.pack(side="left", fill="both", expand=True, padx=4)
-        self.chart_frame_right = ttk.LabelFrame(middle, text="Top Authentication Issues and Protocols")
-        self.chart_frame_right.pack(side="left", fill="both", expand=True, padx=4)
+        self.chart_panel = ttk.Frame(self.dashboard_tab)
+        self.chart_frame_left = ttk.Frame(self.chart_panel, style="Panel.TFrame")
+        self.chart_frame_left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self.chart_frame_right = ttk.Frame(self.chart_panel, style="Panel.TFrame")
+        self.chart_frame_right.pack(side="left", fill="both", expand=True, padx=(6, 0))
 
         self.chart_canvas_left = None
         self.chart_canvas_right = None
 
-        self.summary_text = tk.Text(self.dashboard_tab, height=6, wrap="word")
-        self.summary_text.pack(fill="x", padx=8, pady=8)
-        self.summary_text.insert("end", "Dashboard will appear here after loading preview.\n")
+        self.summary_text = tk.Text(self.dashboard_tab, height=7, wrap="word")
+        self.summary_text.pack(fill="both", expand=True, padx=10, pady=(8, 10))
+        self.summary_text.insert("end", "Load a scan preview to populate metrics, charts, and evidence summary.\n")
         self.summary_text.config(state="disabled")
 
     def build_tree_with_scroll(self, parent, columns: Tuple[str, ...], headings: Dict[str, str], widths: Dict[str, int]) -> ttk.Treeview:
@@ -2396,6 +2573,8 @@ class NessusAuthDashboardGUI:
                     pass
         self.chart_canvas_left = None
         self.chart_canvas_right = None
+        if hasattr(self, "chart_panel"):
+            self.chart_panel.pack_forget()
 
     def draw_charts(self):
         if not self.data or not MATPLOTLIB_AVAILABLE:
@@ -2403,10 +2582,11 @@ class NessusAuthDashboardGUI:
                 self.thread_log("matplotlib not installed; charts disabled. Install: python3 -m pip install matplotlib")
             return
         self.clear_charts()
+        self.chart_panel.pack(fill="both", expand=True, padx=10, pady=(4, 8), before=self.summary_text)
         data = self.data
 
         dark = self.dark_mode.get()
-        figure_bg = "#182235" if dark else "#FFFFFF"
+        figure_bg = "#111C2E" if dark else "#FFFFFF"
         axis_fg = "#E2E8F0" if dark else "#0F172A"
 
         fig1 = Figure(figsize=(5.7, 3.8), dpi=100, facecolor=figure_bg)

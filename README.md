@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/trinetra_logo.png" width="180" alt="Trinetra logo" />
+</p>
+
 # 🛡️ Trinetra
 
 <p align="center">
@@ -13,7 +17,7 @@
 
 ---
 
-**Search keywords:** Nessus credentialed scan, Nessus CA scan, credential assurance, authentication validation, failed credentials, partial authentication, vulnerability assessment, VAPT reporting, Nessus Excel report, Nessus PDF report, security dashboard.
+**Search keywords:** Nessus credentialed scan, credential assurance, authentication validation, failed credentials, partial authentication, vulnerability assessment, VAPT reporting, Nessus Excel report, Nessus PDF report, security dashboard.
 
 ---
 
