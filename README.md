@@ -300,7 +300,6 @@ Can we export client-ready evidence?
 
 ## ⚠️ Security Notes
 
-- Do not commit Nessus API keys to GitHub.
 - Do not share exported reports publicly.
 - Treat scan data as sensitive internal security evidence.
 - Use least-privilege API keys where possible.
