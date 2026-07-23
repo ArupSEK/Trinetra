@@ -1,7 +1,7 @@
 name: Package Trinetra Secure ZIP
 
 on:
-  push:
+  pull_request:
     branches:
       - agent/package-secure-zip
 
