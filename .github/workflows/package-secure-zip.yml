@@ -1,0 +1,29 @@
+name: Package Trinetra Secure ZIP
+
+on:
+  push:
+    branches:
+      - agent/package-secure-zip
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare clean package
+        run: |
+          mkdir -p package/Trinetra
+          rsync -a --exclude='.git' --exclude='.github' ./ package/Trinetra/
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trinetra-secure-nessus-settings
+          path: package/Trinetra
+          if-no-files-found: error
+          retention-days: 7
