@@ -96,6 +96,7 @@ class SecureCredentialStore:
 
 
 SECURE_STORE = SecureCredentialStore()
+_PATCHED = False
 
 
 def _patch_local_auth_reset() -> None:
@@ -202,9 +203,16 @@ def _patch_dashboard() -> None:
 
 
 def install_secure_persistence() -> None:
+    global _PATCHED
+    if _PATCHED:
+        return
     _patch_local_auth_reset()
     _patch_reset_dialog()
     _patch_dashboard()
+    _PATCHED = True
+
+
+install_secure_persistence()
 
 
 # Re-export public names so existing imports from trinetra_gui continue to work.
@@ -214,5 +222,4 @@ for _name in dir(core):
 
 
 if __name__ == "__main__":
-    install_secure_persistence()
     core.main()
