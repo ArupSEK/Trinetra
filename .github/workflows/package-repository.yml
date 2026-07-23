@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - agent/package-secure-settings
+  pull_request:
   workflow_dispatch:
 
 permissions:
